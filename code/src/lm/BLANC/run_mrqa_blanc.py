@@ -152,11 +152,11 @@ def read_mrqa_examples(input_file, is_training):
 
             example = MRQAExample(
                 qas_id=qas_id,
-                question_text=question_text,
-                doc_tokens=doc_tokens,
-                orig_answer_text=orig_answer_text,
-                start_position=start_position,
-                end_position=end_position)
+                question_text=question_text, #question
+                doc_tokens=doc_tokens, #passage text
+                orig_answer_text=orig_answer_text, # answer text
+                start_position=start_position, #answer start
+                end_position=end_position) #answer end
             examples.append(example)
     logger.info('Num avg answers: {}'.format(num_answers / len(examples)))
     return examples
@@ -304,13 +304,13 @@ def convert_examples_to_features(examples, tokenizer, max_seq_length,
                     unique_id=unique_id,
                     example_index=example_index,
                     doc_span_index=doc_span_index,
-                    tokens=tokens,
+                    tokens=tokens, #Query + Passage Span
                     token_to_orig_map=token_to_orig_map,
                     token_is_max_context=token_is_max_context,
-                    input_ids=input_ids,
-                    input_mask=input_mask,
+                    input_ids=input_ids, # Mask for max seq length
+                    input_mask=input_mask, #Vocab id list
                     segment_ids=segment_ids,
-                    start_position=start_position,
+                    start_position=start_position, #Answer start pos(Query included)
                     end_position=end_position))
             unique_id += 1
 
