@@ -15,6 +15,7 @@ import random
 import time
 import sys
 import gzip
+import six
 from torch import nn
 from io import open
 
@@ -25,6 +26,7 @@ from pytorch_pretrained_bert.file_utils import PYTORCH_PRETRAINED_BERT_CACHE, WE
 from pytorch_pretrained_bert.blanc import BLANC
 from pytorch_pretrained_bert.optimization import BertAdam, warmup_linear
 from pytorch_pretrained_bert.tokenization import BasicTokenizer, BertTokenizer
+from pytorch_pretrained_bert.tokenization import _is_punctuation, _is_whitespace, _is_control
 from mrqa_official_eval import exact_match_score, f1_score, metric_max_over_ground_truths
 
 PRED_FILE = "predictions.json"
@@ -35,6 +37,48 @@ logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s - %(message)s
                     datefmt='%m/%d/%Y %H:%M:%S',
                     level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+def convert_to_unicode(text):
+    """Converts `text` to Unicode (if it's not already), assuming utf-8 input."""
+    if six.PY3:
+        if isinstance(text, str):
+            return text
+        elif isinstance(text, bytes):
+            return text.decode("utf-8", "ignore")
+        else:
+            raise ValueError("Unsupported string type: %s" % (type(text)))
+    elif six.PY2:
+        if isinstance(text, str):
+            return text.decode("utf-8", "ignore")
+        elif isinstance(text, unicode):
+            return text
+        else:
+            raise ValueError("Unsupported string type: %s" % (type(text)))
+    else:
+        raise ValueError("Not running on Python2 or Python 3?")
+
+def tokenize_chinese(text, masking, do_lower_case):
+    temp_x = ""
+    text = convert_to_unicode(text)
+    idx = 0
+    if do_lower_case:
+        text = text.lower()
+
+    while(idx < len(text)):
+        c = text[idx]
+        if text[idx: idx + len(masking)] == masking.lower():
+            temp_x += masking
+            idx += len(masking)
+            continue
+        elif BasicTokenizer._is_chinese_char(ord(c)) or _is_punctuation(c) or \
+                _is_whitespace(c) or _is_control(c):
+            temp_x += " " + c + " "
+        else:
+            temp_x += c
+        
+        idx += 1
+
+    return temp_x.split()
 
 
 class MRQAExample(object):
@@ -47,12 +91,14 @@ class MRQAExample(object):
                  qas_id,
                  question_text,
                  doc_tokens,
+                 #paragraph_text,
                  orig_answer_text=None,
                  start_position=None,
                  end_position=None,
                  is_impossible=None):
         self.qas_id = qas_id
         self.question_text = question_text
+        #self.paragraph_text = paragraph_text
         self.doc_tokens = doc_tokens
         self.orig_answer_text = orig_answer_text
         self.start_position = start_position
@@ -68,6 +114,8 @@ class MRQAExample(object):
         s += ", question_text: %s" % (
             self.question_text)
         s += ", doc_tokens: [%s]" % (" ".join(self.doc_tokens))
+        #s += ", paragraph_text: %s" % (
+        #    self.paragraph_text)
         if self.start_position:
             s += ", start_position: %d" % (self.start_position)
         if self.end_position:
@@ -105,9 +153,10 @@ class InputFeatures(object):
         self.end_position = end_position
 
 
-def read_chinese_examples(line_list, is_training, first_answer_only):
+def read_chinese_examples(line_list, is_training, 
+    first_answer_only, replace_mask, do_lower_case):
     """Read a Chinese json file for pretraining into a list of MRQAExample."""
-    input_data = [json.loads(line.decode('utf-8').strip()) for line in line_list]
+    input_data = [json.loads(line) for line in line_list] #.decode('utf-8').strip()
 
     def is_whitespace(c):
         if c == " " or c == "\t" or c == "\r" or c == "\n" or ord(c) == 0x202F:
@@ -118,34 +167,51 @@ def read_chinese_examples(line_list, is_training, first_answer_only):
     num_answers = 0
     for i, article in enumerate(input_data):
         for entry in article["paragraphs"]:
-            paragraph_text = entry["context"]
+            paragraph_text = entry["context"].strip()
+            raw_doc_tokens = tokenize_chinese(paragraph_text, 
+                    masking = "[UNK]",
+                    do_lower_case= do_lower_case)
             doc_tokens = []
             char_to_word_offset = []
             prev_is_whitespace = True
+            
+            k = 0
+            temp_word = ""
             for c in paragraph_text:
                 if is_whitespace(c):
-                    prev_is_whitespace = True
+                    char_to_word_offset.append(k - 1)
+                    continue
                 else:
-                    if prev_is_whitespace:
-                        doc_tokens.append(c)
-                    else:
-                        doc_tokens[-1] += c
-                    prev_is_whitespace = False
-                char_to_word_offset.append(len(doc_tokens) - 1)
+                    temp_word += c
+                    char_to_word_offset.append(k)
+
+                if do_lower_case:
+                    temp_word = temp_word.lower()
+
+                if temp_word == raw_doc_tokens[k]:
+                    doc_tokens.append(temp_word)
+                    temp_word = ""
+                    k += 1
+
+            if k != len(raw_doc_tokens):
+                logger.info("Warning: paragraph '{}' tokenization error ".format(paragraph_text))
+                continue
 
             for qa in entry["qas"]:
-                qas_id = qa["qid"]
-                question_text = qa["question"]
+                qas_id = article["id"] + "_" + entry["id"] + "_" + qa["id"]
+                question_text = qa["question"].replace("UNK", replace_mask)
                 is_impossible = qa.get('is_impossible', False)
                 start_position = None
                 end_position = None
                 orig_answer_text = None
                 
                 answers = qa["answers"]
+                
                 # import ipdb
                 # ipdb.set_trace()
-                spans = sorted([[span, span + len(spans['text']) - 1] 
-                    for spans in answers for span in spans['answer_all_start']])
+                spans = sorted([[start, start + len(ans['text']) - 1, ans['text']] 
+                    for ans in answers for start in ans['answer_all_start']])
+                print("spans", spans)
                 # take first span
                 if first_answer_only:
                     include_span_num = 1
@@ -153,19 +219,27 @@ def read_chinese_examples(line_list, is_training, first_answer_only):
                     include_span_num = len(spans)
 
                 for i in range(min(include_span_num, len(spans))):
-                    char_start, char_end = spans[i][0], spans[i][1]
+                    char_start, char_end, answer_text = spans[i][0], spans[i][1], spans[i][2]
                     orig_answer_text = paragraph_text[char_start:char_end+1]
+                    print("orig_answer_text", orig_answer_text)
+                    if orig_answer_text != answer_text:
+                        logger.info("Answer error: {}, Original {}".format(
+                            answer_text, orig_answer_text))
+                        continue
+                    
                     start_position, end_position = char_to_word_offset[char_start], char_to_word_offset[char_end]
-                    num_answers += sum([len(spans['char_spans']) for spans in answers])
-
+                    num_answers += sum([len(spans['answer_all_start']) for spans in answers])
+                    print("start_position", "end_position", start_position, end_position)
+                    print("doc_tokens", doc_tokens)
                     example = MRQAExample(
                         qas_id=qas_id,
                         question_text=question_text, #question
+                        #paragraph_text=paragraph_text, # context text
                         doc_tokens=doc_tokens, #passage text
                         orig_answer_text=orig_answer_text, # answer text
                         start_position=start_position, #answer start
                         end_position=end_position, #answer end
-                        is_impossible=is_impossible) 
+                        is_impossible=is_impossible)
                     examples.append(example)
 
                 if len(spans) == 0:
@@ -175,19 +249,20 @@ def read_chinese_examples(line_list, is_training, first_answer_only):
 
                     example = MRQAExample(
                         qas_id=qas_id,
-                        question_text=question_text, #question
-                        doc_tokens=doc_tokens, #passage text
+                        question_text=question_text, # question
+                        paragraph_text=paragraph_text, # context text
+                        #doc_tokens=doc_tokens, # passage text
                         orig_answer_text="", # answer text
-                        start_position=0, #answer start
-                        end_position=0,
-                        is_impossible=True) #answer end
+                        start_position=0, # answer start
+                        end_position=0, # answer end
+                        is_impossible=True) 
                     examples.append(example)
 
     logger.info('Num avg answers: {}'.format(num_answers / len(examples)))
     return examples
 
 
-def convert_examples_to_features(examples, tokenizer, max_seq_length,
+def convert_chinese_examples_to_features(examples, tokenizer, max_seq_length,
                                  doc_stride, max_query_length, is_training):
     """Loads a data file into a list of `InputBatch`s."""
 
@@ -217,6 +292,7 @@ def convert_examples_to_features(examples, tokenizer, max_seq_length,
             tok_end_position = orig_to_tok_index[example.end_position + 1] - 1
         else:
             tok_end_position = len(all_doc_tokens) - 1
+
         (tok_start_position, tok_end_position) = _improve_answer_span(
             all_doc_tokens, tok_start_position, tok_end_position, tokenizer,
             example.orig_answer_text)
@@ -301,7 +377,7 @@ def convert_examples_to_features(examples, tokenizer, max_seq_length,
                 start_position = tok_start_position - doc_start + doc_offset
                 end_position = tok_end_position - doc_start + doc_offset
             
-            if example_index < 0:
+            if example_index == 0:
                 logger.info("*** Example ***")
                 logger.info("unique_id: %s" % (unique_id))
                 logger.info("example_index: %s" % (example_index))
@@ -329,13 +405,13 @@ def convert_examples_to_features(examples, tokenizer, max_seq_length,
                     unique_id=unique_id,
                     example_index=example_index,
                     doc_span_index=doc_span_index,
-                    tokens=tokens, #Query + Passage Span
+                    tokens=tokens, # Query + Passage Span
                     token_to_orig_map=token_to_orig_map,
                     token_is_max_context=token_is_max_context,
                     input_ids=input_ids, # Mask for max seq length
-                    input_mask=input_mask, #Vocab id list
+                    input_mask=input_mask, # Vocab id list
                     segment_ids=segment_ids,
-                    start_position=start_position, #Answer start pos(Query included)
+                    start_position=start_position, # Answer start pos(Query included)
                     end_position=end_position))
             unique_id += 1
 

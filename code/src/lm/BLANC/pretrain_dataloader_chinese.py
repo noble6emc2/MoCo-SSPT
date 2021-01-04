@@ -154,7 +154,7 @@ def multi_process_get_training_data_queue(args):
                     continue
 
                 examples = p_cn.read_chinese_examples(
-                    line_list=line, is_training=True)
+                    line_list=[line], is_training=True, first_answer_only=True)
                 train_features = p_cn.convert_examples_to_features(
                     examples=examples,
                     tokenizer=tokenizer,
@@ -224,7 +224,7 @@ def get_training_batch_chinese(args):
             batch_indicator = 0
             feature_buffer = []
 
-
+ 
 def load_eval_data_batches(args, word2id):
     re = []
     if args.eval_file == "":

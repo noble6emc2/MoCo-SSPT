@@ -36,7 +36,6 @@ logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s - %(message)s
                     level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-
 class MRQAExample(object):
     """
     A single training/test example for the MRQA dataset.
