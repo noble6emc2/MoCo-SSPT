@@ -49,13 +49,15 @@ class MRQAExample(object):
                  doc_tokens,
                  orig_answer_text=None,
                  start_position=None,
-                 end_position=None):
+                 end_position=None,
+                 is_impossible=None):
         self.qas_id = qas_id
         self.question_text = question_text
         self.doc_tokens = doc_tokens
         self.orig_answer_text = orig_answer_text
         self.start_position = start_position
         self.end_position = end_position
+        self.is_impossible = is_impossible
 
     def __str__(self):
         return self.__repr__()
@@ -70,6 +72,8 @@ class MRQAExample(object):
             s += ", start_position: %d" % (self.start_position)
         if self.end_position:
             s += ", end_position: %d" % (self.end_position)
+        if self.is_impossible:
+            s += ", is_impossible: %d" % (self.is_impossible)
         return s
 
 
@@ -101,12 +105,9 @@ class InputFeatures(object):
         self.end_position = end_position
 
 
-def read_mrqa_examples(input_file, is_training):
-    """Read a MRQA json file into a list of MRQAExample."""
-    with gzip.GzipFile(input_file, 'r') as reader:
-        # skip header
-        content = reader.read().decode('utf-8').strip().split('\n')[1:]
-        input_data = [json.loads(line) for line in content]
+def read_chinese_examples(line_list, is_training, first_answer_only):
+    """Read a Chinese json file for pretraining into a list of MRQAExample."""
+    input_data = [json.loads(line.decode('utf-8').strip()) for line in line_list]
 
     def is_whitespace(c):
         if c == " " or c == "\t" or c == "\r" or c == "\n" or ord(c) == 0x202F:
@@ -115,49 +116,73 @@ def read_mrqa_examples(input_file, is_training):
 
     examples = []
     num_answers = 0
-    for i, entry in enumerate(input_data):
-        if i % 1000 == 0:
-            logger.info("Processing %d / %d.." % (i, len(input_data)))
-        paragraph_text = entry["context"]
-        doc_tokens = []
-        char_to_word_offset = []
-        prev_is_whitespace = True
-        for c in paragraph_text:
-            if is_whitespace(c):
-                prev_is_whitespace = True
-            else:
-                if prev_is_whitespace:
-                    doc_tokens.append(c)
+    for i, article in enumerate(input_data):
+        for entry in article["paragraphs"]:
+            paragraph_text = entry["context"]
+            doc_tokens = []
+            char_to_word_offset = []
+            prev_is_whitespace = True
+            for c in paragraph_text:
+                if is_whitespace(c):
+                    prev_is_whitespace = True
                 else:
-                    doc_tokens[-1] += c
-                prev_is_whitespace = False
-            char_to_word_offset.append(len(doc_tokens) - 1)
+                    if prev_is_whitespace:
+                        doc_tokens.append(c)
+                    else:
+                        doc_tokens[-1] += c
+                    prev_is_whitespace = False
+                char_to_word_offset.append(len(doc_tokens) - 1)
 
-        for qa in entry["qas"]:
-            qas_id = qa["qid"]
-            question_text = qa["question"]
-            start_position = None
-            end_position = None
-            orig_answer_text = None
-            
-            answers = qa["detected_answers"]
-            # import ipdb
-            # ipdb.set_trace()
-            spans = sorted([span for spans in answers for span in spans['char_spans']])
-            # take first span
-            char_start, char_end = spans[0][0], spans[0][1]
-            orig_answer_text = paragraph_text[char_start:char_end+1]
-            start_position, end_position = char_to_word_offset[char_start], char_to_word_offset[char_end]
-            num_answers += sum([len(spans['char_spans']) for spans in answers])
+            for qa in entry["qas"]:
+                qas_id = qa["qid"]
+                question_text = qa["question"]
+                is_impossible = qa.get('is_impossible', False)
+                start_position = None
+                end_position = None
+                orig_answer_text = None
+                
+                answers = qa["answers"]
+                # import ipdb
+                # ipdb.set_trace()
+                spans = sorted([[span, span + len(spans['text']) - 1] 
+                    for spans in answers for span in spans['answer_all_start']])
+                # take first span
+                if first_answer_only:
+                    include_span_num = 1
+                else:
+                    include_span_num = len(spans)
 
-            example = MRQAExample(
-                qas_id=qas_id,
-                question_text=question_text, #question
-                doc_tokens=doc_tokens, #passage text
-                orig_answer_text=orig_answer_text, # answer text
-                start_position=start_position, #answer start
-                end_position=end_position) #answer end
-            examples.append(example)
+                for i in range(min(include_span_num, len(spans))):
+                    char_start, char_end = spans[i][0], spans[i][1]
+                    orig_answer_text = paragraph_text[char_start:char_end+1]
+                    start_position, end_position = char_to_word_offset[char_start], char_to_word_offset[char_end]
+                    num_answers += sum([len(spans['char_spans']) for spans in answers])
+
+                    example = MRQAExample(
+                        qas_id=qas_id,
+                        question_text=question_text, #question
+                        doc_tokens=doc_tokens, #passage text
+                        orig_answer_text=orig_answer_text, # answer text
+                        start_position=start_position, #answer start
+                        end_position=end_position, #answer end
+                        is_impossible=is_impossible) 
+                    examples.append(example)
+
+                if len(spans) == 0:
+                    orig_answer_text = paragraph_text[char_start:char_end+1]
+                    start_position, end_position = char_to_word_offset[char_start], char_to_word_offset[char_end]
+                    num_answers += sum([len(spans['char_spans']) for spans in answers])
+
+                    example = MRQAExample(
+                        qas_id=qas_id,
+                        question_text=question_text, #question
+                        doc_tokens=doc_tokens, #passage text
+                        orig_answer_text="", # answer text
+                        start_position=0, #answer start
+                        end_position=0,
+                        is_impossible=True) #answer end
+                    examples.append(example)
+
     logger.info('Num avg answers: {}'.format(num_answers / len(examples)))
     return examples
 
@@ -267,7 +292,7 @@ def convert_examples_to_features(examples, tokenizer, max_seq_length,
             if not (tok_start_position >= doc_start and
                     tok_end_position <= doc_end):
                 out_of_span = True
-            if out_of_span:
+            if out_of_span or example.is_impossible:
                 start_position = 0
                 end_position = 0
             
