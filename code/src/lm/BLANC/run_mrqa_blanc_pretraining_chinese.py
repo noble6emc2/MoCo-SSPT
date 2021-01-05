@@ -139,9 +139,7 @@ class InputFeatures(object):
                  input_mask,
                  segment_ids,
                  start_positions=None,
-                 end_positions=None,
-                 multimatch_start_labels=None,
-                 multimatch_end_labels=None):
+                 end_positions=None):
         self.unique_id = unique_id
         self.example_index = example_index
         self.doc_span_index = doc_span_index
@@ -153,8 +151,6 @@ class InputFeatures(object):
         self.segment_ids = segment_ids
         self.start_positions = start_positions
         self.end_positions = end_positions
-        self.multimatch_start_labels = multimatch_start_labels
-        self.multimatch_end_labels = multimatch_end_labels
 
 
 def read_chinese_examples(line_list, is_training, 
@@ -244,6 +240,10 @@ def read_chinese_examples(line_list, is_training,
                     start_positions.append(0)
                     end_positions.append(0)
 
+                if first_answer_only:
+                    start_positions = start_positions[0]
+                    end_positions = end_positions[0]
+
                 example = MRQAExample(
                     qas_id=qas_id,
                     question_text=question_text, #question
@@ -261,7 +261,8 @@ def read_chinese_examples(line_list, is_training,
 
 
 def convert_chinese_examples_to_features(examples, tokenizer, max_seq_length,
-                                 doc_stride, max_query_length, is_training):
+                                 doc_stride, max_query_length, is_training,
+                                 first_answer_only):
     """Loads a data file into a list of `InputBatch`s."""
 
     unique_id = 1000000000
@@ -285,7 +286,15 @@ def convert_chinese_examples_to_features(examples, tokenizer, max_seq_length,
 
         tok_start_positions = []
         tok_end_positions = []
-        for start_position, end_position in zip(example.start_positions, example.end_positions):
+        
+        if type(example.start_positions) != list:
+            temp_start_positions = [example.start_positions]
+            temp_end_positions = [example.end_positions]
+        else:
+            temp_start_positions = example.start_positions
+            temp_end_positions = example.end_positions
+
+        for start_position, end_position in zip(temp_start_positions, temp_end_positions):
             tok_start_position = -1
             tok_end_position = -1
             tok_start_position = orig_to_tok_index[start_position]
@@ -418,6 +427,10 @@ def convert_chinese_examples_to_features(examples, tokenizer, max_seq_length,
                     logger.info(
                         "answer: %s" % (answer_text))
 
+            if first_answer_only:
+                start_positions = start_positions[0]
+                end_positions = end_positions[0]
+
             features.append(
                 InputFeatures(
                     unique_id=unique_id,
@@ -430,9 +443,7 @@ def convert_chinese_examples_to_features(examples, tokenizer, max_seq_length,
                     input_mask=input_mask, # Vocab id list
                     segment_ids=segment_ids,
                     start_positions=start_positions, # Answer start pos(Query included)
-                    end_positions=end_positions,
-                    multimatch_start_labels=multimatch_start_labels,
-                    multimatch_end_labels=multimatch_end_labels))
+                    end_positions=end_positions,))
             unique_id += 1
 
     return features

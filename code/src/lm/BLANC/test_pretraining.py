@@ -17,8 +17,8 @@ if __name__ == "__main__":
 
             print("length of examples", len(examples))
             print(examples[0])
-            print(examples[0].doc_tokens[examples[0].start_positions[0]])
-            print(examples[0].doc_tokens[examples[0].end_positions[0]])
+            print(examples[0].doc_tokens[examples[0].start_positions])
+            print(examples[0].doc_tokens[examples[0].end_positions])
 
             train_features = p_cn.convert_chinese_examples_to_features(
                 examples=examples,
@@ -26,6 +26,8 @@ if __name__ == "__main__":
                 max_seq_length=384,
                 doc_stride=128,
                 max_query_length=64,
-                is_training=True)
+                is_training=True,
+                first_answer_only=True
+                )
 
             #print(examples)
