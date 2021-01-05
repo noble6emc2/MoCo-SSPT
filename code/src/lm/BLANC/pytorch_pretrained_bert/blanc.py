@@ -1202,7 +1202,7 @@ class BLANC(BertPreTrainedModel):
 
     def forward(self, input_ids, token_type_ids=None, attention_mask=None, 
             start_positions=None, end_positions=None, 
-            multimatch_start_labels=None,  multimatch_end_labels=None,
+            multimatch_start_labels=None,  multimatch_end_labels=None, lmbs=None,
             geometric_p=0.3, window_size=5, lmb=0.5):
         device = input_ids.device
         sequence_output, _ = self.bert(input_ids, token_type_ids, attention_mask, output_all_encoded_layers=False)
@@ -1249,7 +1249,7 @@ class BLANC(BertPreTrainedModel):
             start_positions.clamp_(0, ignored_index)
             end_positions.clamp_(0, ignored_index)
 
-            loss_fct = CrossEntropyLoss(ignore_index=ignored_index)
+            #loss_fct = CrossEntropyLoss(ignore_index=ignored_index)
             dist = self \
                 .generate_soft_label( \
                     start_positions, \
@@ -1258,19 +1258,33 @@ class BLANC(BertPreTrainedModel):
                     ignored_index, \
                     window_size)
             
+
+            dist_losses = dist * torch.log(attention) \
+                        + (1.0 - dist) * torch.log(1.0 - attention)
             dist_total_loss = \
                 torch.mean( \
-                    dist * torch.log(attention) \
-                        + (1.0 - dist) * torch.log(1.0 - attention) \
+                    dist_losses \
                 )
             dist_total_loss = - 2.0 * dist_total_loss
+            
+            if lmbs is None:
+                start_loss = cross_entropy(start_logits, multimatch_start_labels,
+                        output_batch = False)
+                end_loss = cross_entropy(end_logits, multimatch_end_labels,
+                        output_batch = False)
+                f_loss = (start_loss \
+                            + end_loss) / 2.0
+                total_loss = (1.0 - lmb) * f_loss + lmb * dist_total_loss
+            else:
+                start_losses = cross_entropy(start_logits, multimatch_start_labels,
+                        output_batch = True)
+                end_losses = cross_entropy(end_logits, multimatch_end_labels,
+                        output_batch = True)
+                f_losses = (start_losses \
+                            + end_losses) / 2.0
+                total_loss = (1.0 - lmbs) * f_losses + lmbs * dist_losses
 
-            start_loss = loss_fct(start_logits, start_positions)
-            end_loss = loss_fct(end_logits, end_positions)
-            f_loss = (start_loss \
-                        + end_loss) / 2.0
-            total_loss = (1.0 - lmb) * f_loss + lmb * dist_total_loss
-            return (total_loss, dist_total_loss)
+            return (total_loss, dist_total_loss, dist_losses)
         else:
             return start_logits, end_logits, attention
     
@@ -1309,5 +1323,9 @@ class BLANC(BertPreTrainedModel):
 
         return context_dist
 
-    def cross_entropy(self, logits, labels):
-        
+    def cross_entropy(self, logits, labels, output_batch = False):
+        log_probs = nn.functional.log_softmax(logits, dim=-1)
+        if output_batch:
+            return -1 * torch.mean(torch.sum(log_probs * labels, dim = -1), dim = -1)
+        else:
+            return -1 * torch.mean(torch.sum(log_probs * labels, dim = -1))

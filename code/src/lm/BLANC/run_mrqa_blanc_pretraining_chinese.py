@@ -413,6 +413,8 @@ def convert_chinese_examples_to_features(examples, tokenizer, max_seq_length,
                     answer_text = " ".join(tokens[start_positions[0]:(end_positions[0] + 1)])
                     logger.info("start_positions: %s" % (start_positions))
                     logger.info("end_positions: %s" % (end_positions))
+                    logger.info("start_labels: %s" % (multimatch_start_labels))
+                    logger.info("end_labels: %s" % (multimatch_end_labels))
                     logger.info(
                         "answer: %s" % (answer_text))
 
