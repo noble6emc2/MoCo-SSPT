@@ -1200,7 +1200,10 @@ class BLANC(BertPreTrainedModel):
         self.block_outputs = nn.Linear(config.hidden_size, 2)
         self.apply(self.init_bert_weights)
 
-    def forward(self, input_ids, token_type_ids=None, attention_mask=None, start_positions=None, end_positions=None, geometric_p=0.3, window_size=5, lmb=0.5):
+    def forward(self, input_ids, token_type_ids=None, attention_mask=None, 
+            start_positions=None, end_positions=None, 
+            multimatch_start_labels=None,  multimatch_end_labels=None,
+            geometric_p=0.3, window_size=5, lmb=0.5):
         device = input_ids.device
         sequence_output, _ = self.bert(input_ids, token_type_ids, attention_mask, output_all_encoded_layers=False)
         bsize = sequence_output.size(0)
@@ -1303,4 +1306,8 @@ class BLANC(BertPreTrainedModel):
                 target_ind = j - ends_[i]
                 context_dist[i][j] = \
                     math.pow(p, target_ind)
+
         return context_dist
+
+    def cross_entropy(self, logits, labels):
+        

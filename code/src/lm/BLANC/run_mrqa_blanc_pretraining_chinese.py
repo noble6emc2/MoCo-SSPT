@@ -93,16 +93,16 @@ class MRQAExample(object):
                  doc_tokens,
                  #paragraph_text,
                  orig_answer_text=None,
-                 start_position=None,
-                 end_position=None,
+                 start_positions=None,
+                 end_positions=None,
                  is_impossible=None):
         self.qas_id = qas_id
         self.question_text = question_text
         #self.paragraph_text = paragraph_text
         self.doc_tokens = doc_tokens
         self.orig_answer_text = orig_answer_text
-        self.start_position = start_position
-        self.end_position = end_position
+        self.start_positions = start_positions
+        self.end_positions = end_positions
         self.is_impossible = is_impossible
 
     def __str__(self):
@@ -113,13 +113,13 @@ class MRQAExample(object):
         s += "qas_id: %s" % (self.qas_id)
         s += ", question_text: %s" % (
             self.question_text)
-        s += ", doc_tokens: [%s]" % (" ".join(self.doc_tokens))
+        s += ", doc_tokens: [%s]" % ("| ".join(self.doc_tokens))
         #s += ", paragraph_text: %s" % (
         #    self.paragraph_text)
-        if self.start_position:
-            s += ", start_position: %d" % (self.start_position)
-        if self.end_position:
-            s += ", end_position: %d" % (self.end_position)
+        if self.start_positions:
+            s += ", start_positions: %s" % (self.start_positions)
+        if self.end_positions:
+            s += ", end_positions: %s" % (self.end_positions)
         if self.is_impossible:
             s += ", is_impossible: %d" % (self.is_impossible)
         return s
@@ -138,8 +138,10 @@ class InputFeatures(object):
                  input_ids,
                  input_mask,
                  segment_ids,
-                 start_position=None,
-                 end_position=None):
+                 start_positions=None,
+                 end_positions=None,
+                 multimatch_start_labels=None,
+                 multimatch_end_labels=None):
         self.unique_id = unique_id
         self.example_index = example_index
         self.doc_span_index = doc_span_index
@@ -149,8 +151,10 @@ class InputFeatures(object):
         self.input_ids = input_ids
         self.input_mask = input_mask
         self.segment_ids = segment_ids
-        self.start_position = start_position
-        self.end_position = end_position
+        self.start_positions = start_positions
+        self.end_positions = end_positions
+        self.multimatch_start_labels = multimatch_start_labels
+        self.multimatch_end_labels = multimatch_end_labels
 
 
 def read_chinese_examples(line_list, is_training, 
@@ -206,6 +210,7 @@ def read_chinese_examples(line_list, is_training,
                 orig_answer_text = None
                 
                 answers = qa["answers"]
+                num_answers += sum([len(spans['answer_all_start']) for spans in answers])
                 
                 # import ipdb
                 # ipdb.set_trace()
@@ -218,6 +223,8 @@ def read_chinese_examples(line_list, is_training,
                 else:
                     include_span_num = len(spans)
 
+                start_positions = []
+                end_positions = []
                 for i in range(min(include_span_num, len(spans))):
                     char_start, char_end, answer_text = spans[i][0], spans[i][1], spans[i][2]
                     orig_answer_text = paragraph_text[char_start:char_end+1]
@@ -228,35 +235,26 @@ def read_chinese_examples(line_list, is_training,
                         continue
                     
                     start_position, end_position = char_to_word_offset[char_start], char_to_word_offset[char_end]
-                    num_answers += sum([len(spans['answer_all_start']) for spans in answers])
                     print("start_position", "end_position", start_position, end_position)
                     print("doc_tokens", doc_tokens)
-                    example = MRQAExample(
-                        qas_id=qas_id,
-                        question_text=question_text, #question
-                        #paragraph_text=paragraph_text, # context text
-                        doc_tokens=doc_tokens, #passage text
-                        orig_answer_text=orig_answer_text, # answer text
-                        start_position=start_position, #answer start
-                        end_position=end_position, #answer end
-                        is_impossible=is_impossible)
-                    examples.append(example)
+                    start_positions.append(start_position)
+                    end_positions.append(end_position)
 
                 if len(spans) == 0:
-                    orig_answer_text = paragraph_text[char_start:char_end+1]
-                    start_position, end_position = char_to_word_offset[char_start], char_to_word_offset[char_end]
-                    num_answers += sum([len(spans['char_spans']) for spans in answers])
+                    start_positions.append(0)
+                    end_positions.append(0)
 
-                    example = MRQAExample(
-                        qas_id=qas_id,
-                        question_text=question_text, # question
-                        paragraph_text=paragraph_text, # context text
-                        #doc_tokens=doc_tokens, # passage text
-                        orig_answer_text="", # answer text
-                        start_position=0, # answer start
-                        end_position=0, # answer end
-                        is_impossible=True) 
-                    examples.append(example)
+                example = MRQAExample(
+                    qas_id=qas_id,
+                    question_text=question_text, #question
+                    #paragraph_text=paragraph_text, # context text
+                    doc_tokens=doc_tokens, #passage text
+                    orig_answer_text=orig_answer_text, # answer text
+                    start_positions=start_positions, #answer start
+                    end_positions=end_positions, #answer end
+                    is_impossible=is_impossible)
+                examples.append(example)
+
 
     logger.info('Num avg answers: {}'.format(num_answers / len(examples)))
     return examples
@@ -285,17 +283,23 @@ def convert_chinese_examples_to_features(examples, tokenizer, max_seq_length,
                 tok_to_orig_index.append(i)
                 all_doc_tokens.append(sub_token)
 
-        tok_start_position = -1
-        tok_end_position = -1
-        tok_start_position = orig_to_tok_index[example.start_position]
-        if example.end_position < len(example.doc_tokens) - 1:
-            tok_end_position = orig_to_tok_index[example.end_position + 1] - 1
-        else:
-            tok_end_position = len(all_doc_tokens) - 1
+        tok_start_positions = []
+        tok_end_positions = []
+        for start_position, end_position in zip(example.start_positions, example.end_positions):
+            tok_start_position = -1
+            tok_end_position = -1
+            tok_start_position = orig_to_tok_index[start_position]
+            if end_position < len(example.doc_tokens) - 1:
+                tok_end_position = orig_to_tok_index[end_position + 1] - 1
+            else:
+                tok_end_position = len(all_doc_tokens) - 1
 
-        (tok_start_position, tok_end_position) = _improve_answer_span(
-            all_doc_tokens, tok_start_position, tok_end_position, tokenizer,
-            example.orig_answer_text)
+            (tok_start_position, tok_end_position) = _improve_answer_span(
+                all_doc_tokens, tok_start_position, tok_end_position, tokenizer,
+                example.orig_answer_text)
+
+            tok_start_positions.append(tok_start_position)
+            tok_end_positions.append(tok_end_position)
 
         # The -3 accounts for [CLS], [SEP] and [SEP]
         max_tokens_for_doc = max_seq_length - len(query_tokens) - 3
@@ -364,19 +368,31 @@ def convert_chinese_examples_to_features(examples, tokenizer, max_seq_length,
             # we throw it out, since there is nothing to predict.
             doc_start = doc_span.start
             doc_end = doc_span.start + doc_span.length - 1
-            out_of_span = False
-            if not (tok_start_position >= doc_start and
-                    tok_end_position <= doc_end):
-                out_of_span = True
-            if out_of_span or example.is_impossible:
-                start_position = 0
-                end_position = 0
+            start_positions = []
+            end_positions = []
+            for tok_start_position, token_end_position in zip(tok_start_positions, tok_end_positions):
+                out_of_span = False
+                if not (tok_start_position >= doc_start and
+                        tok_end_position <= doc_end):
+                    out_of_span = True
+
+                if out_of_span or example.is_impossible:
+                    start_position = 0
+                    end_position = 0
+                else:
+                    doc_offset = len(query_tokens) + 2
+                    start_position = tok_start_position - doc_start + doc_offset
+                    end_position = tok_end_position - doc_start + doc_offset
+                
+                start_positions.append(start_position)
+                end_positions.append(end_position)
             
-            else:
-                doc_offset = len(query_tokens) + 2
-                start_position = tok_start_position - doc_start + doc_offset
-                end_position = tok_end_position - doc_start + doc_offset
-            
+            multimatch_start_labels = np.zeros((max_seq_length,))
+            multimatch_end_labels = np.zeros((max_seq_length,))
+            multimatch_start_labels[start_positions] = 1
+            multimatch_end_labels[end_positions] = 1
+
+
             if example_index == 0:
                 logger.info("*** Example ***")
                 logger.info("unique_id: %s" % (unique_id))
@@ -394,9 +410,9 @@ def convert_chinese_examples_to_features(examples, tokenizer, max_seq_length,
                 logger.info(
                     "segment_ids: %s" % " ".join([str(x) for x in segment_ids]))
                 if is_training:
-                    answer_text = " ".join(tokens[start_position:(end_position + 1)])
-                    logger.info("start_position: %d" % (start_position))
-                    logger.info("end_position: %d" % (end_position))
+                    answer_text = " ".join(tokens[start_positions[0]:(end_positions[0] + 1)])
+                    logger.info("start_positions: %s" % (start_positions))
+                    logger.info("end_positions: %s" % (end_positions))
                     logger.info(
                         "answer: %s" % (answer_text))
 
@@ -411,8 +427,10 @@ def convert_chinese_examples_to_features(examples, tokenizer, max_seq_length,
                     input_ids=input_ids, # Mask for max seq length
                     input_mask=input_mask, # Vocab id list
                     segment_ids=segment_ids,
-                    start_position=start_position, # Answer start pos(Query included)
-                    end_position=end_position))
+                    start_positions=start_positions, # Answer start pos(Query included)
+                    end_positions=end_positions,
+                    multimatch_start_labels=multimatch_start_labels,
+                    multimatch_end_labels=multimatch_end_labels))
             unique_id += 1
 
     return features

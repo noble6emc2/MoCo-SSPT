@@ -17,8 +17,8 @@ if __name__ == "__main__":
 
             print("length of examples", len(examples))
             print(examples[0])
-            print(examples[0].doc_tokens[examples[0].start_position])
-            print(examples[0].doc_tokens[examples[0].end_position])
+            print(examples[0].doc_tokens[examples[0].start_positions[0]])
+            print(examples[0].doc_tokens[examples[0].end_positions[0]])
 
             train_features = p_cn.convert_chinese_examples_to_features(
                 examples=examples,
