@@ -34,7 +34,6 @@ def tokenize(text):
         tokens.append(t)
     return tokens
 
-
 def convert_tokens_to_ids(tokens, word2id):
     token_ids = []
     for idx, f in enumerate(tokens):
@@ -146,25 +145,34 @@ def multi_process_get_training_data_queue(args):
                     sample_json = json.loads(line)
                 except UnicodeDecodeError:
                     print(f"WARNING: one training line decode utf-8 ERROR")
+                    #print(line)
                     sys.stdout.flush()
                     continue
-                except json.decoder.JSONDecodeError:
+                except json.decoder.JSONDecodeError as json_e:
                     print(f"WARNING: json.decoder.JSONDecodeError  ERROR")
+                    #print(line)
+                    #print(json_e)
                     sys.stdout.flush()
                     continue
 
                 examples = p_cn.read_chinese_examples(
-                    line_list=[line], is_training=True, first_answer_only=True)
-                train_features = p_cn.convert_examples_to_features(
+                    line_list=[line], is_training=True, 
+                    first_answer_only=True, 
+                    replace_mask="[MASK]",
+                    do_lower_case=args.do_lower_case)
+                train_features = p_cn.convert_chinese_examples_to_features(
                     examples=examples,
                     tokenizer=tokenizer,
                     max_seq_length=args.max_seq_length,
                     doc_stride=args.doc_stride,
                     max_query_length=args.max_query_length,
-                    is_training=True)
+                    is_training=True,
+                    first_answer_only=True)
 
+                '''
                 if len(train_features) != 1:
                     print("get_training_data_data_queue WARNING: length of train_features != 1")
+                '''
 
                 '''
                 if max([l for a, l in data[2]]) <= 0:
@@ -173,12 +181,13 @@ def multi_process_get_training_data_queue(args):
                     continue
                 '''
 
-                insert_idx = np.random.randint(0, len(cache))
-                if cache[insert_idx] is None:
-                    cache[insert_idx] = train_features[0]
-                else:
-                    q.put(cache[insert_idx])
-                    cache[insert_idx] = train_features[0]
+                for feature in train_features:
+                    insert_idx = np.random.randint(0, len(cache))
+                    if cache[insert_idx] is None:
+                        cache[insert_idx] = feature
+                    else:
+                        q.put(cache[insert_idx])
+                        cache[insert_idx] = feature
 
                 del line
                 del sample_json
@@ -186,7 +195,7 @@ def multi_process_get_training_data_queue(args):
     total_bytes = os.path.getsize(args.train_file)
     print("train file total bytes: ", total_bytes)
 
-    q = Queue(maxsize=500000)
+    q = Queue(maxsize=32767)
 
     for i in range(args.enqueue_thread_num):  # for fine tuning, thread num CAN be set 1.
         # offset = i * np.random.rand() * total_bytes / (args.enqueue_thread_num + 1)
@@ -205,7 +214,7 @@ def get_training_batch_chinese(args):
     q = multi_process_get_training_data_queue(args)
     global_q = q
     feature_buffer = []
-
+    batch_indicator = 0
     while True:
         new_feature = q.get()
         feature_buffer.append(new_feature)
@@ -216,92 +225,12 @@ def get_training_batch_chinese(args):
             batch_input_ids = torch.tensor([f.input_ids for f in feature_buffer], dtype=torch.long)
             batch_input_mask = torch.tensor([f.input_mask for f in feature_buffer], dtype=torch.long)
             batch_segment_ids = torch.tensor([f.segment_ids for f in feature_buffer], dtype=torch.long)
-            batch_start_positions = torch.tensor([f.start_position for f in feature_buffer], dtype=torch.long)
-            batch_end_positions = torch.tensor([f.end_position for f in feature_buffer], dtype=torch.long)
-
+            batch_start_positions = torch.tensor([f.start_positions for f in feature_buffer], dtype=torch.long)
+            batch_end_positions = torch.tensor([f.end_positions for f in feature_buffer], dtype=torch.long)
+            for feature in feature_buffer:
+                print(feature)
+            print(len(feature_buffer))
             yield batch_input_ids, batch_input_mask, batch_segment_ids, batch_start_positions, batch_end_positions
             
             batch_indicator = 0
             feature_buffer = []
-
- 
-def load_eval_data_batches(args, word2id):
-    re = []
-    if args.eval_file == "":
-        return re
-    
-    fi = open(args.eval_file, 'rb') 
-    for line in fi:
-        try:
-            line = line.rstrip().decode('utf-8')
-            sample_json = json.loads(line)
-        except UnicodeDecodeError:
-            print(f"load_eval_data WARNING: one training line decode utf-8 ERROR")
-            sys.stdout.flush()
-            continue
-        except json.decoder.JSONDecodeError:
-            print(f"load_eval_data WARNING: one training line decode utf-8 ERROR")
-            sys.stdout.flush()
-            continue
-        
-        data = convert_single_sample(sample_json, args, word2id, False, False)
-
-        if args.eval_ans_recall==0:
-            if sum([l for a, l in data[2]]) == 0:
-                print(f"load_eval_data WARNING: {data[0]} has no positive label*********************")
-                sys.stdout.flush()
-                continue
-
-        re.append(data)
-        if len(re) % args.eval_max_sample_num == 0 and len(re)>0:
-            yield re
-            re = []
-    yield re; return
-
-def load_eval_data(args, word2id):
-    # need cut off the max seq(query) len, adding [CLS] and [SEP] and keep the real len, no padding.
-    if args.eval_file == "":
-        return []
-
-    re = []
-    fi = open(args.eval_file, 'rb')
-    for line in fi:
-        try:
-            line = line.rstrip().decode('utf-8')
-            sample_json = json.loads(line)
-        except UnicodeDecodeError:
-            print(f"load_eval_data WARNING: one training line decode utf-8 ERROR")
-            sys.stdout.flush()
-            continue
-        except json.decoder.JSONDecodeError:
-            print(f"load_eval_data WARNING: one training line decode utf-8 ERROR")
-            sys.stdout.flush()
-            continue
-
-        data = convert_single_sample(sample_json, args, word2id, False, False)
-
-        if args.eval_ans_recall==0:
-            if sum([l for a, l in data[2]]) == 0:
-                print(f"load_eval_data WARNING: {data[0]} has no positive label*********************")
-                sys.stdout.flush()
-                continue
-
-        re.append(data)
-    print(f'eval data num: {len(re)}')
-    return re
-
-def debug_load_eval_data(args, word2id):
-    re = []
-    for i in range(5):
-        qid = i
-        q_len = np.random.randint(1, min(30, args.max_query_len))
-        q_ids = np.random.randint(0, 10000, (q_len,))
-        list_of_a_ids_and_label = []
-        for i in range(np.random.randint(10, 100)):
-            a_len = np.random.randint(100, min(300, args.max_seq_len))
-            a_ids = torch.from_numpy(np.random.randint(0, 10000, (a_len,)))
-            label = np.random.randint(0, 2)
-            list_of_a_ids_and_label.append((a_ids, label))
-        re.append((qid, torch.from_numpy(q_ids), list_of_a_ids_and_label))
-    return re
-

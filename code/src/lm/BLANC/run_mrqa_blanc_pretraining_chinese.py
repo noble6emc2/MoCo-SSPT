@@ -152,6 +152,35 @@ class InputFeatures(object):
         self.start_positions = start_positions
         self.end_positions = end_positions
 
+    def __str__(self):
+        return self.__repr__()
+
+    def __repr__(self):
+        s = ""
+        s += "*** Feature ***"
+        s += "\nunique_id: %s" % (self.unique_id)
+        s += "\nexample_index: %s" % (self.example_index)
+        s += "\ndoc_span_index: %s" % (self.doc_span_index)
+        s += "\ntokens: %s" % (" ".join(self.tokens))
+        s += "\ntoken_to_orig_map: %s" % (" ".join([
+            "%d:%d" % (x, y) for (x, y) in self.token_to_orig_map.items()]))
+        s += "\ntoken_is_max_context: %s" % (" ".join([
+            "%d:%s" % (x, y) for (x, y) in self.token_is_max_context.items()
+        ]))
+        s += "\ninput_ids: %s" % " ".join([str(x) for x in self.input_ids])
+        s += "\ninput_mask: %s" % " ".join([str(x) for x in self.input_mask])
+        s += "\nsegment_ids: %s" % " ".join([str(x) for x in self.segment_ids])
+        if type(self.start_positions) == int:
+            s += "\nanswer_span: "+ " ".join(
+                self.tokens[self.start_positions:(self.end_positions + 1)])
+        else:
+            s += "\nanswer_span: "+ " ".join(
+                self.tokens[self.start_positions[0]:(self.end_positions[0] + 1)])
+
+        s += "\nstart_positions: %s" % (self.start_positions)
+        s += "\nend_positions: %s" % (self.end_positions)
+        return s
+
 
 def read_chinese_examples(line_list, is_training, 
     first_answer_only, replace_mask, do_lower_case):
@@ -212,7 +241,7 @@ def read_chinese_examples(line_list, is_training,
                 # ipdb.set_trace()
                 spans = sorted([[start, start + len(ans['text']) - 1, ans['text']] 
                     for ans in answers for start in ans['answer_all_start']])
-                print("spans", spans)
+                #print("spans", spans)
                 # take first span
                 if first_answer_only:
                     include_span_num = 1
@@ -224,15 +253,15 @@ def read_chinese_examples(line_list, is_training,
                 for i in range(min(include_span_num, len(spans))):
                     char_start, char_end, answer_text = spans[i][0], spans[i][1], spans[i][2]
                     orig_answer_text = paragraph_text[char_start:char_end+1]
-                    print("orig_answer_text", orig_answer_text)
+                    #print("orig_answer_text", orig_answer_text)
                     if orig_answer_text != answer_text:
                         logger.info("Answer error: {}, Original {}".format(
                             answer_text, orig_answer_text))
                         continue
                     
                     start_position, end_position = char_to_word_offset[char_start], char_to_word_offset[char_end]
-                    print("start_position", "end_position", start_position, end_position)
-                    print("doc_tokens", doc_tokens)
+                    #print("start_position", "end_position", start_position, end_position)
+                    #print("doc_tokens", doc_tokens)
                     start_positions.append(start_position)
                     end_positions.append(end_position)
 
@@ -256,7 +285,7 @@ def read_chinese_examples(line_list, is_training,
                 examples.append(example)
 
 
-    logger.info('Num avg answers: {}'.format(num_answers / len(examples)))
+    #logger.info('Num avg answers: {}'.format(num_answers / len(examples)))
     return examples
 
 
@@ -402,7 +431,7 @@ def convert_chinese_examples_to_features(examples, tokenizer, max_seq_length,
             multimatch_end_labels[end_positions] = 1
 
 
-            if example_index == 0:
+            if example_index < 0:
                 logger.info("*** Example ***")
                 logger.info("unique_id: %s" % (unique_id))
                 logger.info("example_index: %s" % (example_index))
@@ -433,8 +462,8 @@ def convert_chinese_examples_to_features(examples, tokenizer, max_seq_length,
 
             features.append(
                 InputFeatures(
-                    unique_id=unique_id,
-                    example_index=example_index,
+                    unique_id=str(example.qas_id)+"_"+str(doc_span_index),
+                    example_index=example.qas_id,
                     doc_span_index=doc_span_index,
                     tokens=tokens, # Query + Passage Span
                     token_to_orig_map=token_to_orig_map,
