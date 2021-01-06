@@ -1273,6 +1273,7 @@ class BLANC(BertPreTrainedModel):
                 f_loss = (start_loss \
                             + end_loss) / 2.0
                 total_loss = (1.0 - lmb) * f_loss + lmb * dist_total_loss
+                return (total_loss, dist_total_loss, reduced_dist_losses)
             else:
                 loss_fct = CrossEntropyLoss(ignore_index=ignored_index, reduction='none')
                 start_losses = loss_fct(start_logits, start_positions)
@@ -1280,8 +1281,7 @@ class BLANC(BertPreTrainedModel):
                 f_losses = (start_losses \
                             + end_losses) / 2.0
                 total_loss = torch.mean((1.0 - lmbs) * f_losses + lmbs * reduced_dist_losses)
-
-            return (total_loss, dist_total_loss, reduced_dist_losses)
+                return (total_loss, dist_total_loss, reduced_dist_losses)
         else:
             return start_logits, end_logits, attention
     

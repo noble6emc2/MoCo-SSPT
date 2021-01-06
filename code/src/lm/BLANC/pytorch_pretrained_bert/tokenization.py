@@ -81,7 +81,7 @@ class BertTokenizer(object):
     """Runs end-to-end tokenization: punctuation splitting + wordpiece"""
 
     def __init__(self, vocab_file, do_lower_case=True, max_len=None, do_basic_tokenize=True,
-                 never_split=("[UNK]", "[SEP]", "[PAD]", "[CLS]", "[MASK]")):
+                 never_split=("[UNK]", "[SEP]", "[PAD]", "[CLS]", "[MASK]", "[unused1]")):
         """Constructs a BertTokenizer.
 
         Args:
@@ -209,7 +209,7 @@ class BasicTokenizer(object):
 
     def __init__(self,
                  do_lower_case=True,
-                 never_split=("[UNK]", "[SEP]", "[PAD]", "[CLS]", "[MASK]")):
+                 never_split=("[UNK]", "[SEP]", "[PAD]", "[CLS]", "[MASK]", "[unused1]")):
         """Constructs a BasicTokenizer.
 
         Args:

@@ -16,13 +16,16 @@ import time
 import sys
 import gzip
 import six
+import unicodedata
+import re
 from torch import nn
 from io import open
 
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, TensorDataset
-from pytorch_pretrained_bert.file_utils import PYTORCH_PRETRAINED_BERT_CACHE, WEIGHTS_NAME, CONFIG_NAME
+from pytorch_pretrained_bert.file_utils import PYTORCH_PRETRAINED_BERT_CACHE
+from pytorch_pretrained_bert.file_utils import WEIGHTS_NAME_A, CONFIG_NAME_A, WEIGHTS_NAME_B, CONFIG_NAME_B
 from pytorch_pretrained_bert.blanc import BLANC
 from pytorch_pretrained_bert.optimization import BertAdam, warmup_linear
 from pytorch_pretrained_bert.tokenization import BasicTokenizer, BertTokenizer
@@ -66,7 +69,7 @@ def tokenize_chinese(text, masking, do_lower_case):
 
     while(idx < len(text)):
         c = text[idx]
-        if text[idx: idx + len(masking)] == masking.lower():
+        if masking is not None and text[idx: idx + len(masking)] == masking.lower():
             temp_x += masking
             idx += len(masking)
             continue
@@ -183,7 +186,8 @@ class InputFeatures(object):
 
 
 def read_chinese_examples(line_list, is_training, 
-    first_answer_only, replace_mask, do_lower_case):
+    first_answer_only, replace_mask, do_lower_case,
+    remove_query_in_passage):
     """Read a Chinese json file for pretraining into a list of MRQAExample."""
     input_data = [json.loads(line) for line in line_list] #.decode('utf-8').strip()
 
@@ -198,7 +202,7 @@ def read_chinese_examples(line_list, is_training,
         for entry in article["paragraphs"]:
             paragraph_text = entry["context"].strip()
             raw_doc_tokens = tokenize_chinese(paragraph_text, 
-                    masking = "[UNK]",
+                    masking = None,
                     do_lower_case= do_lower_case)
             doc_tokens = []
             char_to_word_offset = []
@@ -228,6 +232,21 @@ def read_chinese_examples(line_list, is_training,
 
             for qa in entry["qas"]:
                 qas_id = article["id"] + "_" + entry["id"] + "_" + qa["id"]
+                if qa["question"].find('UNK') == -1:
+                    print(f"WARNING: Cannot Find UNK in Question %s" % qas_id)
+                    continue
+
+                if remove_query_in_passage:
+                    query = qa["question"]
+                    mask_start = query.find("UNK")
+                    mask_end = mask_start + 3
+                    pattern = query[:mask_start].strip() + ".*" + query[mask_end:].strip()
+                    if re.search(unicodedata.normalize('NFKC', pattern),
+                        unicodedata.normalize('NFKC', paragraph_text)) is not None:
+                        #print(f"WARNING: Query in Passage Detected in Question %s" % qas_id)
+                        #print("Question", query, "Passage", paragraph_text)
+                        continue
+
                 question_text = qa["question"].replace("UNK", replace_mask)
                 is_impossible = qa.get('is_impossible', False)
                 start_position = None
@@ -1023,13 +1042,13 @@ def main(args):
                     if n_gpu == 1:
                         batch = tuple(t.to(device) for t in batch)
                     input_ids, input_mask, segment_ids, start_positions, end_positions = batch
-                    loss, _ = model(input_ids, segment_ids, input_mask, start_positions, end_positions, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+                    loss, _, _ = model(input_ids, segment_ids, input_mask, start_positions, end_positions, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
                     
                     if n_gpu > 1:
                         loss = loss.mean()
                     if args.gradient_accumulation_steps > 1:
                         loss = loss / args.gradient_accumulation_steps
-
+                        
                     if args.fp16:
                         optimizer.backward(loss)
                     else:
@@ -1115,6 +1134,353 @@ def main(args):
             for key in sorted(result.keys()):
                 writer.write("%s = %s\n" % (key, str(result[key])))
 
+def main_cotraining(args):
+    device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
+    n_gpu = torch.cuda.device_count()
+    logger.info("device: {}, n_gpu: {}, 16-bits training: {}".format(
+        device, n_gpu, args.fp16))
+
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    if n_gpu > 0:
+        torch.cuda.manual_seed_all(args.seed)
+
+    if args.gradient_accumulation_steps < 1:
+        raise ValueError("Invalid gradient_accumulation_steps parameter: {}, should be >= 1".format(
+                            args.gradient_accumulation_steps))
+    args.train_batch_size = \
+        args.train_batch_size // args.gradient_accumulation_steps
+
+    if not args.do_train and not args.do_eval:
+        raise ValueError("At least one of `do_train` or `do_eval` must be True.")
+
+    if args.do_train:
+        assert (args.train_file is not None) and (args.dev_file is not None)
+
+    if args.eval_test:
+        assert args.test_file is not None
+    else:
+        assert args.dev_file is not None
+
+    if not os.path.exists(args.output_dir):
+        os.makedirs(args.output_dir)
+    if args.do_train:
+        logger.addHandler(logging.FileHandler(os.path.join(args.output_dir, "train.log"), 'w'))
+    else:
+        logger.addHandler(logging.FileHandler(os.path.join(args.output_dir, "eval.log"), 'w'))
+    logger.info(args)
+
+    tokenizer = BertTokenizer.from_pretrained(
+        args.model, do_lower_case=args.do_lower_case)
+
+    if args.do_train or (not args.eval_test):
+        with gzip.GzipFile(args.dev_file, 'r') as reader:
+            content = reader.read().decode('utf-8').strip().split('\n')[1:]
+            eval_dataset = [json.loads(line) for line in content]
+        eval_examples = read_mrqa_examples(
+            input_file=args.dev_file, is_training=False)
+        eval_features = convert_examples_to_features(
+            examples=eval_examples,
+            tokenizer=tokenizer,
+            max_seq_length=args.max_seq_length,
+            doc_stride=args.doc_stride,
+            max_query_length=args.max_query_length,
+            is_training=False)
+        logger.info("***** Dev *****")
+        logger.info("  Num orig examples = %d", len(eval_examples))
+        logger.info("  Num split examples = %d", len(eval_features))
+        logger.info("  Batch size = %d", args.eval_batch_size)
+        all_input_ids = torch.tensor([f.input_ids for f in eval_features], dtype=torch.long)
+        all_input_mask = torch.tensor([f.input_mask for f in eval_features], dtype=torch.long)
+        all_segment_ids = torch.tensor([f.segment_ids for f in eval_features], dtype=torch.long)
+        all_example_index = torch.arange(all_input_ids.size(0), dtype=torch.long)
+        eval_data = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_example_index)
+        eval_dataloader = DataLoader(eval_data, batch_size=args.eval_batch_size)
+
+    if args.do_train:
+        train_examples = read_mrqa_examples(
+            input_file=args.train_file, is_training=True)
+        train_features = convert_examples_to_features(
+                examples=train_examples,
+                tokenizer=tokenizer,
+                max_seq_length=args.max_seq_length,
+                doc_stride=args.doc_stride,
+                max_query_length=args.max_query_length,
+                is_training=True)
+
+        if args.train_mode == 'sorted' or args.train_mode == 'random_sorted':
+            train_features = sorted(train_features, key=lambda f: np.sum(f.input_mask))
+        else:
+            random.shuffle(train_features)
+
+        all_input_ids = torch.tensor([f.input_ids for f in train_features], dtype=torch.long)
+        all_input_mask = torch.tensor([f.input_mask for f in train_features], dtype=torch.long)
+        all_segment_ids = torch.tensor([f.segment_ids for f in train_features], dtype=torch.long)
+        all_start_positions = torch.tensor([f.start_position for f in train_features], dtype=torch.long)
+        all_end_positions = torch.tensor([f.end_position for f in train_features], dtype=torch.long)
+        train_data = TensorDataset(all_input_ids, all_input_mask, all_segment_ids,
+                                   all_start_positions, all_end_positions)
+        train_dataloader = DataLoader(train_data, batch_size=args.train_batch_size)
+        train_batches = [batch for batch in train_dataloader]
+
+        num_train_optimization_steps = \
+            args.num_iteration // args.gradient_accumulation_steps * args.num_train_epochs
+        logger.info("***** Train *****")
+        logger.info("  Num orig examples = %d", len(train_examples))
+        logger.info("  Num split examples = %d", len(train_dataloader))
+        logger.info("  Batch size = %d", args.train_batch_size)
+        logger.info("  Num steps = %d", num_train_optimization_steps)
+
+        eval_step = max(1, args.num_iteration // args.eval_per_epoch)
+        best_result = None
+        lrs = [args.learning_rate] if args.learning_rate else [1e-6, 2e-6, 3e-6, 5e-6, 1e-5, 2e-5, 3e-5, 5e-5]
+        for lr in lrs:
+            model_a, pretrained_weights_a = BLANC.from_pretrained(
+                args.model, cache_dir=PYTORCH_PRETRAINED_BERT_CACHE)
+            model_b, pretrained_weights_b = BLANC.from_pretrained(
+                args.model, cache_dir=PYTORCH_PRETRAINED_BERT_CACHE)
+            if args.fp16:
+                model_a.half()
+                model_b.half()
+
+            model_a.to(device)
+            model_b.to(device)
+            if n_gpu > 1:
+                model_a = torch.nn.DataParallel(model_a)
+                model_b = torch.nn.DataParallel(model_b)
+
+            param_optimizer_a = list(model_a.named_parameters())
+            param_optimizer_b = list(model_b.named_parameters())
+            param_optimizer_a = [n for n in param_optimizer_a if 'pooler' not in n[0]]
+            param_optimizer_b = [n for n in param_optimizer_b if 'pooler' not in n[0]]
+            no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
+            optimizer_grouped_parameters_a = [
+                {'params': [p for n, p in param_optimizer_a
+                            if not any(nd in n for nd in no_decay)], 'weight_decay': 0.01},
+                {'params': [p for n, p in param_optimizer_a
+                            if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
+            ]
+            optimizer_grouped_parameters_b = [
+                {'params': [p for n, p in param_optimizer_b
+                            if not any(nd in n for nd in no_decay)], 'weight_decay': 0.01},
+                {'params': [p for n, p in param_optimizer_b
+                            if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
+            ]
+
+            if args.fp16:
+                try:
+                    from apex.optimizers import FP16_Optimizer
+                    from apex.optimizers import FusedAdam
+                except ImportError:
+                    raise ImportError("Please install apex from https://www.github.com/nvidia/apex"
+                                      "to use distributed and fp16 training.")
+                optimizer_a = FusedAdam(optimizer_grouped_parameters_a,
+                                      lr=lr,
+                                      bias_correction=False,
+                                      max_grad_norm=1.0)
+                optimizer_b = FusedAdam(optimizer_grouped_parameters_b,
+                                      lr=lr,
+                                      bias_correction=False,
+                                      max_grad_norm=1.0)
+                if args.loss_scale == 0:
+                    optimizer_a = FP16_Optimizer(optimizer_a, dynamic_loss_scale=True)
+                    optimizer_b = FP16_Optimizer(optimizer_b, dynamic_loss_scale=True)
+                else:
+                    optimizer_a = FP16_Optimizer(optimizer_a, static_loss_scale=args.loss_scale)
+                    optimizer_b = FP16_Optimizer(optimizer_b, static_loss_scale=args.loss_scale)
+            else:
+                optimizer_a = BertAdam(optimizer_grouped_parameters_a,
+                                     lr=lr,
+                                     warmup=args.warmup_proportion,
+                                     t_total=num_train_optimization_steps)
+                optimizer_b = BertAdam(optimizer_grouped_parameters_b,
+                                     lr=lr,
+                                     warmup=args.warmup_proportion,
+                                     t_total=num_train_optimization_steps)
+            global_step = 0
+            start_time = time.time()
+            lmb_window_list_a = []
+            lmb_window_list_b = []
+            for epoch in range(int(args.num_train_epochs)):
+                logger.info("Start epoch #{} (lr = {})...".format(epoch, lr))
+                for step, batch in enumerate(train_batches):
+                    if n_gpu == 1:
+                        batch = tuple(t.to(device) for t in batch)
+
+                    model_a.eval()
+                    model_b.eval()
+                    input_ids, input_mask, segment_ids, start_positions, end_positions = batch
+                    with torch.no_grad():
+                        _, _, context_losses_a = model_a(input_ids, segment_ids, input_mask, start_positions, end_positions, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+                        _, _, context_losses_b = model_b(input_ids, segment_ids, input_mask, start_positions, end_positions, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+                        _, _, self_context_losses_a = model_a(input_ids, segment_ids, input_mask, start_positions, end_positions, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+                        _, _, self_context_losses_b = model_b(input_ids, segment_ids, input_mask, start_positions, end_positions, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+                    
+                    lmb_list_a = [i for i in 
+                        context_losses_b.detach().cpu().numpy()]
+                    lmb_list_b = [i for i in 
+                        context_losses_a.detach().cpu().numpy()]
+                    if len(lmb_window_list_a) + args.train_batch_size <= args.moving_loss_num:
+                        lmb_window_list_a += lmb_list_a
+                        lmb_window_list_b += lmb_list_b
+                    else:
+                        pop_num = (args.moving_loss_num - 
+                            len(lmb_window_list_a) - args.train_batch_size)
+                        lmb_window_list_a = (
+                            lmb_window_list_a[pop_num:] + lmb_list_a)
+                        lmb_window_list_b = (
+                            lmb_window_list_b[pop_num:] + lmb_list_b)
+                    
+                    moving_loss_a = np.mean(lmb_window_list_a)
+                    moving_loss_b = np.mean(lmb_window_list_b)
+                    lmbs_a = torch.Tensor([args.lmb 
+                        if l <= moving_loss_a else 0. 
+                        for l in lmb_list_a])
+                    lmbs_b = torch.Tensor([args.lmb 
+                        if l <= moving_loss_b else 0. 
+                        for l in lmb_list_b])
+                    
+                    model_a.train()
+                    model_b.train()
+                    loss_a, _, _ = model_a(input_ids, segment_ids, input_mask, start_positions, end_positions, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+                    loss_b, _, _ = model_b(input_ids, segment_ids, input_mask, start_positions, end_positions, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+
+                    if n_gpu > 1:
+                        loss_a = loss_a.mean()
+                        loss_b = loss_b.mean()
+
+                    if args.gradient_accumulation_steps > 1:
+                        loss_a = loss_a / args.gradient_accumulation_steps
+                        loss_b = loss_b / args.gradient_accumulation_steps
+
+                    if args.fp16:
+                        optimizer_a.backward(loss_a)
+                        optimizer_b.backward(loss_b)
+                    else:
+                        loss_a.backward()
+                        loss_b.backward()
+                    
+                    if (step + 1) % args.gradient_accumulation_steps == 0:
+                        if args.fp16:
+                            lr_this_step = lr * \
+                                warmup_linear(global_step/num_train_optimization_steps, args.warmup_proportion)
+                            for param_group in optimizer_a.param_groups:
+                                param_group['lr'] = lr_this_step
+                            for param_group in optimizer_b.param_groups:
+                                param_group['lr'] = lr_this_step
+
+                        optimizer_a.step()
+                        optimizer_a.zero_grad()
+                        optimizer_b.step()
+                        optimizer_b.zero_grad()
+                        global_step += 1
+
+                    if (step + 1) % eval_step == 0:
+                        logger.info('Epoch: {}, Step: {} / {}, used_time = {:.2f}s'.format(
+                            epoch, step + 1, len(args.num_iteration), time.time() - start_time))
+
+                        save_model = False
+                        if args.do_eval:
+                            result_a, _, _ = \
+                                evaluate(args, model_a, device, eval_dataset,
+                                         eval_dataloader, eval_examples, eval_features)
+                            result_b, _, _ = \
+                                evaluate(args, model_b, device, eval_dataset,
+                                         eval_dataloader, eval_examples, eval_features)
+                            model_a.train()
+                            model_b.train()
+                            result_a['global_step'] = global_step
+                            result_a['epoch'] = epoch
+                            result_a['learning_rate'] = lr
+                            result_a['batch_size'] = args.train_batch_size
+                            result_b['global_step'] = global_step
+                            result_b['epoch'] = epoch
+                            result_b['learning_rate'] = lr
+                            result_b['batch_size'] = args.train_batch_size
+                            if (best_result is None) or (
+                                    max(result_a[args.eval_metric], result_b[args.eval_metric]) 
+                                    > best_result[args.eval_metric]):
+                                best_result = (result_b 
+                                    if result_b[args.eval_metric] > result_a[args.eval_metric] 
+                                    else result_a)
+                                save_model = True
+                                logger.info("!!! Best dev %s (lr=%s, epoch=%d): %.2f" %
+                                            (args.eval_metric, str(lr), epoch, best_result[args.eval_metric]))
+                        else:
+                            save_model = True
+                        if save_model:
+                            model_to_save = model_a.module if hasattr(model_a, 'module') else model_a
+                            output_model_file = os.path.join(args.output_dir_a, WEIGHTS_NAME_A)
+                            output_config_file = os.path.join(args.output_dir_a, CONFIG_NAME_A)
+                            torch.save(model_to_save.state_dict(), output_model_file)
+                            model_to_save.config.to_json_file(output_config_file)
+                            tokenizer.save_vocabulary(args.output_dir_a)
+                            if result_a:
+                                with open(os.path.join(args.output_dir, EVAL_FILE_A), "w") as writer:
+                                    for key in sorted(result_a.keys()):
+                                        writer.write("%s = %s\n" % (key, str(result_a[key])))
+
+                            model_to_save = model_b.module if hasattr(model_b, 'module') else model_b
+                            output_model_file = os.path.join(args.output_dir_b, WEIGHTS_NAME_B)
+                            output_config_file = os.path.join(args.output_dir_b, CONFIG_NAME_B)
+                            torch.save(model_to_save.state_dict(), output_model_file)
+                            model_to_save.config.to_json_file(output_config_file)
+                            tokenizer.save_vocabulary(args.output_dir_b)
+                            if result_b:
+                                with open(os.path.join(args.output_dir, EVAL_FILE_B), "w") as writer:
+                                    for key in sorted(result_b.keys()):
+                                        writer.write("%s = %s\n" % (key, str(result_b[key])))
+
+    if args.do_eval:
+        if args.eval_test:
+            with gzip.GzipFile(args.test_file, 'r') as reader:
+                content = reader.read().decode('utf-8').strip().split('\n')[1:]
+                eval_dataset = [json.loads(line) for line in content]
+            eval_examples = read_mrqa_examples(
+                input_file=args.test_file, is_training=False)
+            eval_features = convert_examples_to_features(
+                examples=eval_examples,
+                tokenizer=tokenizer,
+                max_seq_length=args.max_seq_length,
+                doc_stride=args.doc_stride,
+                max_query_length=args.max_query_length,
+                is_training=False)
+            logger.info("***** Test *****")
+            logger.info("  Num orig examples = %d", len(eval_examples))
+            logger.info("  Num split examples = %d", len(eval_features))
+            logger.info("  Batch size = %d", args.eval_batch_size)
+            all_input_ids = torch.tensor([f.input_ids for f in eval_features], dtype=torch.long)
+            all_input_mask = torch.tensor([f.input_mask for f in eval_features], dtype=torch.long)
+            all_segment_ids = torch.tensor([f.segment_ids for f in eval_features], dtype=torch.long)
+            all_example_index = torch.arange(all_input_ids.size(0), dtype=torch.long)
+            eval_data = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_example_index)
+            eval_dataloader = DataLoader(eval_data, batch_size=args.eval_batch_size)
+        model_a, pretrained_weights_a = BLANC.from_pretrained(args.output_dir_a)
+        model_b, pretrained_weights_b = BLANC.from_pretrained(args.output_dir_a)
+        if args.fp16:
+            model_a.half()
+            model_b.half()
+        model_a.to(device)
+        model_b.to(device)
+        result_a, preds_a, nbest_preds_a = \
+            evaluate(args, model_a, device, eval_dataset,
+                     eval_dataloader, eval_examples, eval_features)
+        result_b, preds_b, nbest_preds_b = \
+            evaluate(args, model_b, device, eval_dataset,
+                     eval_dataloader, eval_examples, eval_features)
+        with open(os.path.join(args.output_dir_a, PRED_FILE), "w") as writer:
+            writer.write(json.dumps(preds_a, indent=4) + "\n")
+        with open(os.path.join(args.output_dir_a, TEST_FILE), "w") as writer:
+            for key in sorted(result_a.keys()):
+                writer.write("%s = %s\n" % (key, str(result_a[key])))
+
+        with open(os.path.join(args.output_dir_b, PRED_FILE), "w") as writer:
+            writer.write(json.dumps(preds_b, indent=4) + "\n")
+        with open(os.path.join(args.output_dir_b, TEST_FILE), "w") as writer:
+            for key in sorted(result_b.keys()):
+                writer.write("%s = %s\n" % (key, str(result_b[key])))
+
 
 if __name__ == "__main__":
         parser = argparse.ArgumentParser()
@@ -1138,7 +1504,7 @@ if __name__ == "__main__":
         parser.add_argument("--do_train", action='store_true', help="Whether to run training.")
         parser.add_argument("--train_mode", type=str, default='random_sorted', choices=['random', 'sorted', 'random_sorted'])
         parser.add_argument("--do_eval", action='store_true', help="Whether to run eval on the dev set.")
-        parser.add_argument("--do_lower_case", action='store_true', help="Set this flag if you are using an uncased model.")
+        #parser.add_argument("--do_lower_case", action='store_true', help="Set this flag if you are using an uncased model.")
         parser.add_argument("--eval_test", action="store_true", help="Whether to evaluate on final test set.")
         parser.add_argument("--train_batch_size", default=32, type=int, help="Total batch size for training.")
         parser.add_argument("--eval_batch_size", default=8, type=int, help="Total batch size for predictions.")
@@ -1174,6 +1540,8 @@ if __name__ == "__main__":
         parser.add_argument('--geometric_p', type=float, default=0.3)
         parser.add_argument('--window_size', type=int, default=5)
         parser.add_argument('--lmb', type=float, default=0.5)
+        parser.add_argument('--do_lower_case', type=bool, default=True)
+        parser.add_argument('--remove_query_in_passage', type=bool, default=True)
         args = parser.parse_args()
 
         main(args)

@@ -158,8 +158,13 @@ def multi_process_get_training_data_queue(args):
                 examples = p_cn.read_chinese_examples(
                     line_list=[line], is_training=True, 
                     first_answer_only=True, 
-                    replace_mask="[MASK]",
-                    do_lower_case=args.do_lower_case)
+                    replace_mask="[unused1]",
+                    do_lower_case=args.do_lower_case,
+                    remove_query_in_passage=args.remove_query_in_passage)
+
+                if len(examples) == 0:
+                    continue
+                
                 train_features = p_cn.convert_chinese_examples_to_features(
                     examples=examples,
                     tokenizer=tokenizer,

@@ -15,7 +15,8 @@ if __name__ == "__main__":
                 line_list=[line], is_training=True, 
                 first_answer_only=True, 
                 replace_mask="[UNK]",
-                do_lower_case=True)
+                do_lower_case=True,
+                remove_query_in_passage=True)
 
             print("length of examples", len(examples))
             print(examples[0])
@@ -46,6 +47,7 @@ if __name__ == "__main__":
                         help="The maximum number of tokens for the question. Questions longer than this will "
                                 "be truncated to this length.")
     parser.add_argument('--do_lower_case', type=bool, default=True)
+    parser.add_argument('--remove_query_in_passage', type=bool, default=True)
     parser.add_argument('--enqueue_thread_num', type=int, default=8)
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--window_size', type=int, default=5)
