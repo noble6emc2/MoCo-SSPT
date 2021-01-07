@@ -1,23 +1,24 @@
 python src/lm/BLANC/run_mrqa_blanc.py \
   --do_train \
-  --do_eval \
+  #--do_eval \
   --eval_test \
-  --model spanbert-base-cased \
+  --model bert-base-chinese \
   --train_file $DATA_DIR/train.jsonl.gz \
   --dev_file $DATA_DIR/dev.jsonl.gz \
   --test_file $DATA_DIR/test.jsonl.gz \
   --train_batch_size 8 \
   --eval_batch_size 16  \
   --learning_rate 2e-5 \
-  --num_train_epochs 3 \
+  --num_train_epochs 1 \
   --max_seq_length 384 \
   --doc_stride 128 \
   --eval_metric span_f1 \
-  --output_dir ./checkpoints/naturalqa/$LABEL/$SEED \
+  --output_dir ./checkpoints/pertraining_cn_bs/$LABEL/$SEED \
   --eval_per_epoch 20 \
   --seed $SEED \
   --geometric_p $GEOP \
   --window_size $WINS \
-  --lmb $LMB
-  --enqueue_thread_num 2\
-  --is_co_training false
+  --lmb $LMB \
+  --enqueue_thread_num 2 \
+  --is_co_training false \
+  --num_iteration 37500 \
