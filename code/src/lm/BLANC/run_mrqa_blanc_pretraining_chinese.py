@@ -242,8 +242,9 @@ def read_chinese_examples(line_list, is_training,
                     query = qa["question"]
                     mask_start = query.find("UNK")
                     mask_end = mask_start + 3
-                    pattern = query[:mask_start].strip() + ".*" + query[mask_end:].strip()
-                    if re.search(unicodedata.normalize('NFKC', pattern),
+                    pattern = (re.escape(unicodedata.normalize('NFKC', query[:mask_start].strip())) + 
+                        ".*" + re.escape(unicodedata.normalize('NFKC', query[mask_end:].strip())))
+                    if re.search(pattern,
                         unicodedata.normalize('NFKC', paragraph_text)) is not None:
                         #print(f"WARNING: Query in Passage Detected in Question %s" % qas_id)
                         #print("Question", query, "Passage", paragraph_text)
@@ -1055,12 +1056,13 @@ def main(args):
                                      t_total=num_train_optimization_steps)
             global_step = 0
             start_time = time.time()
+            from tqdm import tqdm
             for epoch in range(int(args.num_train_epochs)):
                 model.train()
                 logger.info("Start epoch #{} (lr = {})...".format(epoch, lr))
-                for step, batch in enumerate(
+                for step, batch in tqdm(enumerate(
                     cn_dataloader.get_training_batch_chinese(
-                        args, co_training = False)):
+                        args, co_training = False))):
                     if step >= args.num_iteration:
                         break
 
@@ -1069,7 +1071,8 @@ def main(args):
 
                     input_ids, input_mask, segment_ids, start_positions, end_positions = batch
                     loss, _, _ = model(input_ids, segment_ids, input_mask, start_positions, end_positions, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
-                    
+                    print("step", step,"loss", loss)
+
                     if n_gpu > 1:
                         loss = loss.mean()
                     if args.gradient_accumulation_steps > 1:
@@ -1619,8 +1622,10 @@ if __name__ == "__main__":
         args = parser.parse_args()
         args.output_dir_a = args.output_dir + "_a"
         args.output_dir_b = args.output_dir + "_b"
+        print('------is_co_training-----', args.is_co_training)
 
         if args.is_co_training:
             main_cotraining(args)
         else:
+            print('enter main....')
             main(args)

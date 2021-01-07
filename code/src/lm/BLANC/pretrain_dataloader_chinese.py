@@ -235,15 +235,15 @@ def get_training_batch_chinese(args, co_training: bool):
             #print('after q.get')
             #sys.stdout.flush()
             batch_indicator += 1
-            if batch_indicator == args.batch_size:  # ignore the reminders
+            if batch_indicator == args.train_batch_size:  # ignore the reminders
                 batch_input_ids = torch.tensor([f.input_ids for f in feature_buffer], dtype=torch.long)
                 batch_input_mask = torch.tensor([f.input_mask for f in feature_buffer], dtype=torch.long)
                 batch_segment_ids = torch.tensor([f.segment_ids for f in feature_buffer], dtype=torch.long)
                 batch_start_positions = torch.tensor([f.start_positions for f in feature_buffer], dtype=torch.long)
                 batch_end_positions = torch.tensor([f.end_positions for f in feature_buffer], dtype=torch.long)
-                for feature in feature_buffer:
-                    print(feature)
-                print(len(feature_buffer))
+                #for feature in feature_buffer:
+                #    print(feature)
+                #print(len(feature_buffer))
                 yield batch_input_ids, batch_input_mask, batch_segment_ids, batch_start_positions, batch_end_positions
                 
                 batch_indicator = 0
@@ -268,7 +268,7 @@ def get_training_batch_chinese(args, co_training: bool):
             #print('after q.get')
             #sys.stdout.flush()
             batch_indicator += 1
-            if batch_indicator == args.batch_size:  # ignore the reminders
+            if batch_indicator == args.train_batch_size:  # ignore the reminders
                 batch_input_ids = torch.tensor([f.input_ids for f, _ in feature_buffer], dtype=torch.long)
                 batch_input_mask = torch.tensor([f.input_mask for f, _ in feature_buffer], dtype=torch.long)
                 batch_segment_ids = torch.tensor([f.segment_ids for f, _ in feature_buffer], dtype=torch.long)

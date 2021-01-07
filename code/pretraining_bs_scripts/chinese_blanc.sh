@@ -1,12 +1,10 @@
-python src/lm/BLANC/run_mrqa_blanc.py \
+python src/lm/BLANC/run_mrqa_blanc_pretraining_chinese.py \
   --do_train \
-  #--do_eval \
-  --eval_test \
   --model bert-base-chinese \
-  --train_file $DATA_DIR/train.jsonl.gz \
+  --train_file $DATA_DIR/all.json \
   --dev_file $DATA_DIR/dev.jsonl.gz \
   --test_file $DATA_DIR/test.jsonl.gz \
-  --train_batch_size 8 \
+  --train_batch_size 1 \
   --eval_batch_size 16  \
   --learning_rate 2e-5 \
   --num_train_epochs 1 \
@@ -20,5 +18,4 @@ python src/lm/BLANC/run_mrqa_blanc.py \
   --window_size $WINS \
   --lmb $LMB \
   --enqueue_thread_num 2 \
-  --is_co_training false \
-  --num_iteration 37500 \
+  --num_iteration 37500
