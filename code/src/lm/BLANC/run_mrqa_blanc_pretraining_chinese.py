@@ -936,7 +936,7 @@ def main(args):
     tokenizer = BertTokenizer.from_pretrained(
         args.model, do_lower_case=args.do_lower_case)
 
-    if args.do_train or (not args.eval_test):
+    if args.do_eval and (args.do_train or (not args.eval_test)):
         with gzip.GzipFile(args.dev_file, 'r') as reader:
             content = reader.read().decode('utf-8').strip().split('\n')[1:]
             eval_dataset = [json.loads(line) for line in content]
@@ -1092,7 +1092,7 @@ def main(args):
 
                     if (step + 1) % eval_step == 0:
                         logger.info('Epoch: {}, Step: {} / {}, used_time = {:.2f}s'.format(
-                            epoch, step + 1, len(train_dataloader), time.time() - start_time))
+                            epoch, step + 1, args.num_iteration, time.time() - start_time))
 
                         save_model = False
                         if args.do_eval:
@@ -1447,7 +1447,7 @@ def main_cotraining(args):
 
                     if (step + 1) % eval_step == 0:
                         logger.info('Epoch: {}, Step: {} / {}, used_time = {:.2f}s'.format(
-                            epoch, step + 1, len(args.num_iteration), time.time() - start_time))
+                            epoch, step + 1, args.num_iteration, time.time() - start_time))
 
                         save_model = False
                         if args.do_eval:
