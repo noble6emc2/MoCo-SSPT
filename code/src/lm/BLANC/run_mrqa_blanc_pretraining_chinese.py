@@ -18,14 +18,16 @@ import gzip
 import six
 import unicodedata
 import re
+import math
 from torch import nn
 from io import open
 
 import numpy as np
 import torch
+import pretrain_dataloader_chinese as cn_dataloader
 from torch.utils.data import DataLoader, TensorDataset
 from pytorch_pretrained_bert.file_utils import PYTORCH_PRETRAINED_BERT_CACHE
-from pytorch_pretrained_bert.file_utils import WEIGHTS_NAME_A, CONFIG_NAME_A, WEIGHTS_NAME_B, CONFIG_NAME_B
+from pytorch_pretrained_bert.file_utils import WEIGHTS_NAME, CONFIG_NAME
 from pytorch_pretrained_bert.blanc import BLANC
 from pytorch_pretrained_bert.optimization import BertAdam, warmup_linear
 from pytorch_pretrained_bert.tokenization import BasicTokenizer, BertTokenizer
@@ -938,6 +940,7 @@ def main(args):
         with gzip.GzipFile(args.dev_file, 'r') as reader:
             content = reader.read().decode('utf-8').strip().split('\n')[1:]
             eval_dataset = [json.loads(line) for line in content]
+        '''
         eval_examples = read_mrqa_examples(
             input_file=args.dev_file, is_training=False)
         eval_features = convert_examples_to_features(
@@ -947,6 +950,21 @@ def main(args):
             doc_stride=args.doc_stride,
             max_query_length=args.max_query_length,
             is_training=False)
+        '''
+        eval_examples = p_cn.read_chinese_examples(
+                line_list=content, is_training=True, 
+                first_answer_only=True, 
+                replace_mask="[unused1]",
+                do_lower_case=True,
+                remove_query_in_passage=True)
+        eval_features = p_cn.convert_chinese_examples_to_features(
+                    examples=eval_examples,
+                    tokenizer=tokenizer,
+                    max_seq_length=args.max_seq_length,
+                    doc_stride=args.doc_stride,
+                    max_query_length=args.max_query_length,
+                    is_training=True,
+                    first_answer_only=True)
         logger.info("***** Dev *****")
         logger.info("  Num orig examples = %d", len(eval_examples))
         logger.info("  Num split examples = %d", len(eval_features))
@@ -959,6 +977,7 @@ def main(args):
         eval_dataloader = DataLoader(eval_data, batch_size=args.eval_batch_size)
 
     if args.do_train:
+        '''
         train_examples = read_mrqa_examples(
             input_file=args.train_file, is_training=True)
         train_features = convert_examples_to_features(
@@ -983,16 +1002,17 @@ def main(args):
                                    all_start_positions, all_end_positions)
         train_dataloader = DataLoader(train_data, batch_size=args.train_batch_size)
         train_batches = [batch for batch in train_dataloader]
+        '''
 
         num_train_optimization_steps = \
-            len(train_dataloader) // args.gradient_accumulation_steps * args.num_train_epochs
+            args.num_iteration // args.gradient_accumulation_steps * args.num_train_epochs
         logger.info("***** Train *****")
-        logger.info("  Num orig examples = %d", len(train_examples))
-        logger.info("  Num split examples = %d", len(train_dataloader))
+        logger.info("  Num orig examples = %d", args.num_iteration * args.train_batch_size)
+        logger.info("  Num split examples = %d", args.num_iteration)
         logger.info("  Batch size = %d", args.train_batch_size)
         logger.info("  Num steps = %d", num_train_optimization_steps)
 
-        eval_step = max(1, len(train_batches) // args.eval_per_epoch)
+        eval_step = max(1, args.num_iteration // args.eval_per_epoch)
         best_result = None
         lrs = [args.learning_rate] if args.learning_rate else [1e-6, 2e-6, 3e-6, 5e-6, 1e-5, 2e-5, 3e-5, 5e-5]
         for lr in lrs:
@@ -1038,9 +1058,15 @@ def main(args):
             for epoch in range(int(args.num_train_epochs)):
                 model.train()
                 logger.info("Start epoch #{} (lr = {})...".format(epoch, lr))
-                for step, batch in enumerate(train_batches):
+                for step, batch in enumerate(
+                    cn_dataloader.get_training_batch_chinese(
+                        args, co_training = False)):
+                    if step >= args.num_iteration:
+                        break
+
                     if n_gpu == 1:
                         batch = tuple(t.to(device) for t in batch)
+
                     input_ids, input_mask, segment_ids, start_positions, end_positions = batch
                     loss, _, _ = model(input_ids, segment_ids, input_mask, start_positions, end_positions, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
                     
@@ -1178,6 +1204,7 @@ def main_cotraining(args):
         with gzip.GzipFile(args.dev_file, 'r') as reader:
             content = reader.read().decode('utf-8').strip().split('\n')[1:]
             eval_dataset = [json.loads(line) for line in content]
+        '''
         eval_examples = read_mrqa_examples(
             input_file=args.dev_file, is_training=False)
         eval_features = convert_examples_to_features(
@@ -1187,6 +1214,21 @@ def main_cotraining(args):
             doc_stride=args.doc_stride,
             max_query_length=args.max_query_length,
             is_training=False)
+        '''
+        eval_examples = p_cn.read_chinese_examples(
+                line_list=content, is_training=True, 
+                first_answer_only=True, 
+                replace_mask="[unused1]",
+                do_lower_case=True,
+                remove_query_in_passage=True)
+        eval_features = p_cn.convert_chinese_examples_to_features(
+                    examples=eval_examples,
+                    tokenizer=tokenizer,
+                    max_seq_length=args.max_seq_length,
+                    doc_stride=args.doc_stride,
+                    max_query_length=args.max_query_length,
+                    is_training=True,
+                    first_answer_only=True)
         logger.info("***** Dev *****")
         logger.info("  Num orig examples = %d", len(eval_examples))
         logger.info("  Num split examples = %d", len(eval_features))
@@ -1199,6 +1241,7 @@ def main_cotraining(args):
         eval_dataloader = DataLoader(eval_data, batch_size=args.eval_batch_size)
 
     if args.do_train:
+        '''
         train_examples = read_mrqa_examples(
             input_file=args.train_file, is_training=True)
         train_features = convert_examples_to_features(
@@ -1223,12 +1266,13 @@ def main_cotraining(args):
                                    all_start_positions, all_end_positions)
         train_dataloader = DataLoader(train_data, batch_size=args.train_batch_size)
         train_batches = [batch for batch in train_dataloader]
+        '''
 
         num_train_optimization_steps = \
             args.num_iteration // args.gradient_accumulation_steps * args.num_train_epochs
         logger.info("***** Train *****")
-        logger.info("  Num orig examples = %d", len(train_examples))
-        logger.info("  Num split examples = %d", len(train_dataloader))
+        logger.info("  Num orig examples = %d", args.num_iteration * args.train_batch_size)
+        logger.info("  Num split examples = %d", args.num_iteration)
         logger.info("  Batch size = %d", args.train_batch_size)
         logger.info("  Num steps = %d", num_train_optimization_steps)
 
@@ -1304,47 +1348,72 @@ def main_cotraining(args):
             lmb_window_list_b = []
             for epoch in range(int(args.num_train_epochs)):
                 logger.info("Start epoch #{} (lr = {})...".format(epoch, lr))
-                for step, batch in enumerate(train_batches):
+                for step, (batch_a, batch_b) in enumerate(
+                    cn_dataloader.get_training_batch_chinese(
+                        args, co_training = True)):
+                    if step >= args.num_iteration:
+                        break
+
                     if n_gpu == 1:
-                        batch = tuple(t.to(device) for t in batch)
+                        batch_a = tuple(t.to(device) for t in batch_a)
+                        batch_b = tuple(t.to(device) for t in batch_b)
 
                     model_a.eval()
                     model_b.eval()
-                    input_ids, input_mask, segment_ids, start_positions, end_positions = batch
+                    input_ids_a, input_mask_a, segment_ids_a, start_positions_a, end_positions_a = batch_a
+                    input_ids_b, input_mask_b, segment_ids_b, start_positions_b, end_positions_b = batch_b
                     with torch.no_grad():
-                        _, _, context_losses_a = model_a(input_ids, segment_ids, input_mask, start_positions, end_positions, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
-                        _, _, context_losses_b = model_b(input_ids, segment_ids, input_mask, start_positions, end_positions, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
-                        _, _, self_context_losses_a = model_a(input_ids, segment_ids, input_mask, start_positions, end_positions, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
-                        _, _, self_context_losses_b = model_b(input_ids, segment_ids, input_mask, start_positions, end_positions, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+                        _, _, context_losses_a = model_a(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+                        _, _, context_losses_b = model_b(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+                        _, _, self_context_losses_a = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+                        _, _, self_context_losses_b = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
                     
                     lmb_list_a = [i for i in 
                         context_losses_b.detach().cpu().numpy()]
                     lmb_list_b = [i for i in 
                         context_losses_a.detach().cpu().numpy()]
-                    if len(lmb_window_list_a) + args.train_batch_size <= args.moving_loss_num:
-                        lmb_window_list_a += lmb_list_a
-                        lmb_window_list_b += lmb_list_b
-                    else:
-                        pop_num = (args.moving_loss_num - 
-                            len(lmb_window_list_a) - args.train_batch_size)
-                        lmb_window_list_a = (
-                            lmb_window_list_a[pop_num:] + lmb_list_a)
-                        lmb_window_list_b = (
-                            lmb_window_list_b[pop_num:] + lmb_list_b)
-                    
-                    moving_loss_a = np.mean(lmb_window_list_a)
-                    moving_loss_b = np.mean(lmb_window_list_b)
-                    lmbs_a = torch.Tensor([args.lmb 
-                        if l <= moving_loss_a else 0. 
-                        for l in lmb_list_a])
-                    lmbs_b = torch.Tensor([args.lmb 
-                        if l <= moving_loss_b else 0. 
-                        for l in lmb_list_b])
                     
                     model_a.train()
                     model_b.train()
-                    loss_a, _, _ = model_a(input_ids, segment_ids, input_mask, start_positions, end_positions, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
-                    loss_b, _, _ = model_b(input_ids, segment_ids, input_mask, start_positions, end_positions, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+                    if args.co_training_mode == 'moving_loss' and len(lmb_window_list_a) == args.moving_loss_num:
+                        if len(lmb_window_list_a) + args.train_batch_size <= args.moving_loss_num:
+                            lmb_window_list_a += lmb_list_a
+                            lmb_window_list_b += lmb_list_b
+                        else:
+                            pop_num = (args.moving_loss_num - 
+                                len(lmb_window_list_a) - args.train_batch_size)
+                            lmb_window_list_a = (
+                                lmb_window_list_a[pop_num:] + lmb_list_a)
+                            lmb_window_list_b = (
+                                lmb_window_list_b[pop_num:] + lmb_list_b)
+
+                        moving_loss_a = np.mean(lmb_window_list_a)
+                        moving_loss_b = np.mean(lmb_window_list_b)
+                        lmbs_a = torch.Tensor([args.lmb 
+                            if l <= moving_loss_a else 0. 
+                            for l in self_context_losses_a.detach().cpu().numpy()])
+                        lmbs_b = torch.Tensor([args.lmb 
+                            if l <= moving_loss_b else 0. 
+                            for l in self_context_losses_b.detach().cpu().numpy()])
+                        loss_a, _, _ = model_a(input_ids, segment_ids, input_mask, start_positions, end_positions, args.geometric_p, window_size=args.window_size, lmbs=lmbs_a)
+                        loss_b, _, _ = model_b(input_ids, segment_ids, input_mask, start_positions, end_positions, args.geometric_p, window_size=args.window_size, lmbs=lmbs_b)
+                    elif args.co_training_mode == 'data_cur':
+                        top_k_index_a = set(np.argsort(lmb_list_a)[:math.ceil(arg.theta * len(lmb_list_a))])
+                        top_k_index_b = set(np.argsort(lmb_list_b)[:math.ceil(arg.theta * len(lmb_list_b))])
+                        lmbs_a = torch.Tensor([
+                                args.lmb if idx in top_k_index_a else 0.
+                                for idx in range(len(lmb_list_a))
+                                ])
+                        lmbs_b = torch.Tensor([
+                                args.lmb if idx in top_k_index_b else 0.
+                                for idx in range(len(lmb_list_a))
+                                ])
+                        loss_a, _, _ = model_a(input_ids, segment_ids, input_mask, start_positions, end_positions, args.geometric_p, window_size=args.window_size, lmbs=lmbs_a)
+                        loss_b, _, _ = model_b(input_ids, segment_ids, input_mask, start_positions, end_positions, args.geometric_p, window_size=args.window_size, lmbs=lmbs_b)
+                    else:
+                        loss_a, _, _ = model_a(input_ids, segment_ids, input_mask, start_positions, end_positions, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+                        loss_b, _, _ = model_b(input_ids, segment_ids, input_mask, start_positions, end_positions, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+                    
 
                     if n_gpu > 1:
                         loss_a = loss_a.mean()
@@ -1409,26 +1478,27 @@ def main_cotraining(args):
                                             (args.eval_metric, str(lr), epoch, best_result[args.eval_metric]))
                         else:
                             save_model = True
+
                         if save_model:
                             model_to_save = model_a.module if hasattr(model_a, 'module') else model_a
-                            output_model_file = os.path.join(args.output_dir_a, WEIGHTS_NAME_A)
-                            output_config_file = os.path.join(args.output_dir_a, CONFIG_NAME_A)
+                            output_model_file = os.path.join(args.output_dir_a, WEIGHTS_NAME)
+                            output_config_file = os.path.join(args.output_dir_a, CONFIG_NAME)
                             torch.save(model_to_save.state_dict(), output_model_file)
                             model_to_save.config.to_json_file(output_config_file)
                             tokenizer.save_vocabulary(args.output_dir_a)
                             if result_a:
-                                with open(os.path.join(args.output_dir, EVAL_FILE_A), "w") as writer:
+                                with open(os.path.join(args.output_dir_a, EVAL_FILE), "w") as writer:
                                     for key in sorted(result_a.keys()):
                                         writer.write("%s = %s\n" % (key, str(result_a[key])))
 
                             model_to_save = model_b.module if hasattr(model_b, 'module') else model_b
-                            output_model_file = os.path.join(args.output_dir_b, WEIGHTS_NAME_B)
-                            output_config_file = os.path.join(args.output_dir_b, CONFIG_NAME_B)
+                            output_model_file = os.path.join(args.output_dir_b, WEIGHTS_NAME)
+                            output_config_file = os.path.join(args.output_dir_b, CONFIG_NAME)
                             torch.save(model_to_save.state_dict(), output_model_file)
                             model_to_save.config.to_json_file(output_config_file)
                             tokenizer.save_vocabulary(args.output_dir_b)
                             if result_b:
-                                with open(os.path.join(args.output_dir, EVAL_FILE_B), "w") as writer:
+                                with open(os.path.join(args.output_dir_b, EVAL_FILE), "w") as writer:
                                     for key in sorted(result_b.keys()):
                                         writer.write("%s = %s\n" % (key, str(result_b[key])))
 
@@ -1484,7 +1554,7 @@ def main_cotraining(args):
 
 if __name__ == "__main__":
         parser = argparse.ArgumentParser()
-        parser.add_argument("--model", default=None, type=str, required=True)
+        parser.add_argument("--model", default="bert-base-chinese", type=str, required=True)
         parser.add_argument("--output_dir", default=None, type=str, required=True,
                             help="The output directory where the model checkpoints and predictions will be written.")
         parser.add_argument("--train_file", default=None, type=str)
@@ -1509,7 +1579,7 @@ if __name__ == "__main__":
         parser.add_argument("--train_batch_size", default=32, type=int, help="Total batch size for training.")
         parser.add_argument("--eval_batch_size", default=8, type=int, help="Total batch size for predictions.")
         parser.add_argument("--learning_rate", default=None, type=float, help="The initial learning rate for Adam.")
-        parser.add_argument("--num_train_epochs", default=3.0, type=float,
+        parser.add_argument("--num_train_epochs", default=1.0, type=float,
                             help="Total number of training epochs to perform.")
         parser.add_argument("--eval_metric", default='f1', type=str)
         parser.add_argument("--warmup_proportion", default=0.1, type=float,
@@ -1539,9 +1609,18 @@ if __name__ == "__main__":
                                  "Positive power of 2: static loss scaling value.\n")
         parser.add_argument('--geometric_p', type=float, default=0.3)
         parser.add_argument('--window_size', type=int, default=5)
+        parser.add_argument('--num_iteration', type=int, default=9375)
         parser.add_argument('--lmb', type=float, default=0.5)
         parser.add_argument('--do_lower_case', type=bool, default=True)
         parser.add_argument('--remove_query_in_passage', type=bool, default=True)
+        parser.add_argument('--co_training_mode', type=str, default='data_cur')
+        parser.add_argument('--enqueue_thread_num', type=int, default=4)
+        parser.add_argument('--is_co_training', type=bool, default=False)
         args = parser.parse_args()
+        args.output_dir_a = args.output_dir + "_a"
+        args.output_dir_b = args.output_dir + "_b"
 
-        main(args)
+        if args.is_co_training:
+            main_cotraining(args)
+        else:
+            main(args)

@@ -14,7 +14,7 @@ if __name__ == "__main__":
             examples = p_cn.read_chinese_examples(
                 line_list=[line], is_training=True, 
                 first_answer_only=True, 
-                replace_mask="[UNK]",
+                replace_mask="[unused1]",
                 do_lower_case=True,
                 remove_query_in_passage=True)
 
@@ -43,12 +43,12 @@ if __name__ == "__main__":
     parser.add_argument("--doc_stride", default=128, type=int,
                         help="When splitting up a long document into chunks, "
                                 "how much stride to take between chunks.")
-    parser.add_argument("--max_query_length", default=64, type=int,
+    parser.add_argument("--max_query_length", default=128, type=int,
                         help="The maximum number of tokens for the question. Questions longer than this will "
                                 "be truncated to this length.")
     parser.add_argument('--do_lower_case', type=bool, default=True)
     parser.add_argument('--remove_query_in_passage', type=bool, default=True)
-    parser.add_argument('--enqueue_thread_num', type=int, default=8)
+    parser.add_argument('--enqueue_thread_num', type=int, default=1)
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--window_size', type=int, default=5)
     parser.add_argument('--lmb', type=float, default=0.5)
@@ -57,5 +57,5 @@ if __name__ == "__main__":
     parser.add_argument('--model', type=str, default="bert-base-chinese")
     args = parser.parse_args()
     
-    for batch in cn_dataloader.get_training_batch_chinese(args):
+    for batch in cn_dataloader.get_training_batch_chinese(args, co_training = True):
         input()

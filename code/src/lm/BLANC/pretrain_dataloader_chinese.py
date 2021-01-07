@@ -120,7 +120,7 @@ def get_training_data_queue(args):
     return q
 
 
-def multi_process_get_training_data_queue(args):
+def multi_process_get_training_data_queue(args, start, end):
     def enqueue(q, offset):
         print("train file offset: ", offset)
         fi = open(args.train_file, 'rb')
@@ -136,23 +136,28 @@ def multi_process_get_training_data_queue(args):
             if first_time:
                 fi.seek(int(offset))
                 first_time = False
-            else:
+            elif start > end:
                 fi.seek(0)
+            else:
+                fi.seek(int(start))
 
             for line in fi:
+                if fi.tell() >= end:
+                    break
+
                 try:
                     line = line.rstrip().decode('utf-8')
                     sample_json = json.loads(line)
                 except UnicodeDecodeError:
-                    print(f"WARNING: one training line decode utf-8 ERROR")
+                    #print(f"WARNING: one training line decode utf-8 ERROR")
                     #print(line)
-                    sys.stdout.flush()
+                    #sys.stdout.flush()
                     continue
                 except json.decoder.JSONDecodeError as json_e:
-                    print(f"WARNING: json.decoder.JSONDecodeError  ERROR")
+                    #print(f"WARNING: json.decoder.JSONDecodeError  ERROR")
                     #print(line)
                     #print(json_e)
-                    sys.stdout.flush()
+                    #sys.stdout.flush()
                     continue
 
                 examples = p_cn.read_chinese_examples(
@@ -204,38 +209,91 @@ def multi_process_get_training_data_queue(args):
 
     for i in range(args.enqueue_thread_num):  # for fine tuning, thread num CAN be set 1.
         # offset = i * np.random.rand() * total_bytes / (args.enqueue_thread_num + 1)
-        offset = np.random.rand() * total_bytes
+        offset = np.random.rand() * (end - start) + start
         print("enqueue process started : ", i, offset, offset / total_bytes)
         p = Process(target=enqueue, args=(q, offset))
         p.start()
     return q
 
 
+global_q_a = None
+global_q_b = None
 global_q = None
 
 
-def get_training_batch_chinese(args):
-    global global_q
-    q = multi_process_get_training_data_queue(args)
-    global_q = q
-    feature_buffer = []
-    batch_indicator = 0
-    while True:
-        new_feature = q.get()
-        feature_buffer.append(new_feature)
-        #print('after q.get')
-        #sys.stdout.flush()
-        batch_indicator += 1
-        if batch_indicator == args.batch_size:  # ignore the reminders
-            batch_input_ids = torch.tensor([f.input_ids for f in feature_buffer], dtype=torch.long)
-            batch_input_mask = torch.tensor([f.input_mask for f in feature_buffer], dtype=torch.long)
-            batch_segment_ids = torch.tensor([f.segment_ids for f in feature_buffer], dtype=torch.long)
-            batch_start_positions = torch.tensor([f.start_positions for f in feature_buffer], dtype=torch.long)
-            batch_end_positions = torch.tensor([f.end_positions for f in feature_buffer], dtype=torch.long)
-            for feature in feature_buffer:
-                print(feature)
-            print(len(feature_buffer))
-            yield batch_input_ids, batch_input_mask, batch_segment_ids, batch_start_positions, batch_end_positions
-            
-            batch_indicator = 0
-            feature_buffer = []
+def get_training_batch_chinese(args, co_training: bool):
+    total_bytes = os.path.getsize(args.train_file)
+    if not co_training:
+        global global_q
+        q = multi_process_get_training_data_queue(args, 0, total_bytes)
+        global_q = q
+        feature_buffer = []
+        batch_indicator = 0
+        while True:
+            new_feature = q.get()
+            feature_buffer.append(new_feature)
+            #print('after q.get')
+            #sys.stdout.flush()
+            batch_indicator += 1
+            if batch_indicator == args.batch_size:  # ignore the reminders
+                batch_input_ids = torch.tensor([f.input_ids for f in feature_buffer], dtype=torch.long)
+                batch_input_mask = torch.tensor([f.input_mask for f in feature_buffer], dtype=torch.long)
+                batch_segment_ids = torch.tensor([f.segment_ids for f in feature_buffer], dtype=torch.long)
+                batch_start_positions = torch.tensor([f.start_positions for f in feature_buffer], dtype=torch.long)
+                batch_end_positions = torch.tensor([f.end_positions for f in feature_buffer], dtype=torch.long)
+                for feature in feature_buffer:
+                    print(feature)
+                print(len(feature_buffer))
+                yield batch_input_ids, batch_input_mask, batch_segment_ids, batch_start_positions, batch_end_positions
+                
+                batch_indicator = 0
+                feature_buffer = []
+    else:
+        global global_q_a
+        global global_q_b
+        split_byte = np.random.rand() * total_bytes
+        q_a = multi_process_get_training_data_queue(args, 
+            split_byte, (split_byte + total_bytes // 2) % total_bytes)
+        q_b = multi_process_get_training_data_queue(args, 
+            (split_byte + total_bytes // 2) % total_bytes, split_byte)
+        global_q_a = q_a
+        global_q_b = q_b
+        feature_buffer = []
+        batch_indicator = 0
+        while True:
+            new_feature_a = q_a.get()
+            new_feature_b = q_b.get()
+            feature_buffer.append((new_feature_a,
+                new_feature_b))
+            #print('after q.get')
+            #sys.stdout.flush()
+            batch_indicator += 1
+            if batch_indicator == args.batch_size:  # ignore the reminders
+                batch_input_ids = torch.tensor([f.input_ids for f, _ in feature_buffer], dtype=torch.long)
+                batch_input_mask = torch.tensor([f.input_mask for f, _ in feature_buffer], dtype=torch.long)
+                batch_segment_ids = torch.tensor([f.segment_ids for f, _ in feature_buffer], dtype=torch.long)
+                batch_start_positions = torch.tensor([f.start_positions for f, _ in feature_buffer], dtype=torch.long)
+                batch_end_positions = torch.tensor([f.end_positions for f, _ in feature_buffer], dtype=torch.long)
+                print("--------------------------")
+                for feature, _ in feature_buffer:
+                    print(feature)
+                    break
+                print(len(feature_buffer))
+                batch_a = batch_input_ids, batch_input_mask, batch_segment_ids, batch_start_positions, batch_end_positions
+
+                batch_input_ids = torch.tensor([f.input_ids for _, f in feature_buffer], dtype=torch.long)
+                batch_input_mask = torch.tensor([f.input_mask for _, f in feature_buffer], dtype=torch.long)
+                batch_segment_ids = torch.tensor([f.segment_ids for _, f in feature_buffer], dtype=torch.long)
+                batch_start_positions = torch.tensor([f.start_positions for _, f in feature_buffer], dtype=torch.long)
+                batch_end_positions = torch.tensor([f.end_positions for _, f in feature_buffer], dtype=torch.long)
+                print("--------------------------")
+                for _, feature in feature_buffer:
+                    print(feature)
+                    break
+                print(len(feature_buffer))
+                batch_b = batch_input_ids, batch_input_mask, batch_segment_ids, batch_start_positions, batch_end_positions
+
+                yield batch_a, batch_b
+                
+                batch_indicator = 0
+                feature_buffer = []
