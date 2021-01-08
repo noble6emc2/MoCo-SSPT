@@ -1172,6 +1172,8 @@ def main(args):
 
 def main_cotraining(args):
     device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
+    device_a = torch.device("cuda:0,1" if torch.cuda.is_available() and not args.no_cuda else "cpu")
+    device_b = torch.device("cuda:2,3" if torch.cuda.is_available() and not args.no_cuda else "cpu")
     n_gpu = torch.cuda.device_count()
     logger.info("device: {}, n_gpu: {}, 16-bits training: {}".format(
         device, n_gpu, args.fp16))
@@ -1298,11 +1300,11 @@ def main_cotraining(args):
                 model_a.half()
                 model_b.half()
 
-            model_a.to(device)
-            model_b.to(device)
+            model_a.to(device_a)
+            model_b.to(device_b)
             if n_gpu > 1:
-                model_a = torch.nn.DataParallel(model_a)
-                model_b = torch.nn.DataParallel(model_b)
+                model_a = torch.nn.DataParallel(model_a, device_ids = [0, 1])
+                model_b = torch.nn.DataParallel(model_b, device_ids = [2, 3])
 
             param_optimizer_a = list(model_a.named_parameters())
             param_optimizer_b = list(model_b.named_parameters())

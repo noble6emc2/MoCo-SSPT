@@ -1,4 +1,4 @@
-PYTHONIOENCODING=utf-8 CUDA_VISIBLE_DEVICES=2,3 python3 src/lm/BLANC/run_mrqa_blanc_pretraining_chinese.py \
+PYTHONIOENCODING=utf-8 CUDA_VISIBLE_DEVICES=0,1,2,3 python3 src/lm/BLANC/run_mrqa_blanc_pretraining_chinese_split_gpu.py \
   --do_train \
   --model /home/mindahu/bert-base-chinese.tar.gz \
   --tokenizer /home/mindahu/bert-base-chinese-vocab.txt \
@@ -23,5 +23,4 @@ PYTHONIOENCODING=utf-8 CUDA_VISIBLE_DEVICES=2,3 python3 src/lm/BLANC/run_mrqa_bl
   --enqueue_thread_num 2 \
   --num_iteration 37500 \
   --moving_loss_num 8 \
-  --debug true \
   --theta 0.8
