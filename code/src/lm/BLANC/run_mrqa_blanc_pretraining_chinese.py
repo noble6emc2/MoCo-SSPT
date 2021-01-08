@@ -1199,12 +1199,15 @@ def main_cotraining(args):
     else:
         assert args.dev_file is not None
 
-    if not os.path.exists(args.output_dir):
-        os.makedirs(args.output_dir)
+    if not os.path.exists(args.output_dir_a):
+        #os.makedirs(args.output_dir)
+        os.makedirs(args.output_dir_a)
+        os.makedirs(args.output_dir_b)
+
     if args.do_train:
-        logger.addHandler(logging.FileHandler(os.path.join(args.output_dir, "train.log"), 'w'))
+        logger.addHandler(logging.FileHandler(os.path.join(args.output_dir_a, "train.log"), 'w'))
     else:
-        logger.addHandler(logging.FileHandler(os.path.join(args.output_dir, "eval.log"), 'w'))
+        logger.addHandler(logging.FileHandler(os.path.join(args.output_dir_a, "eval.log"), 'w'))
     logger.info(args)
 
     tokenizer = BertTokenizer.from_pretrained(
