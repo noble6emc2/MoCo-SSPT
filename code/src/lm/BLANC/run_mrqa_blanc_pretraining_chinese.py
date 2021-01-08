@@ -1057,14 +1057,20 @@ def main(args):
             global_step = 0
             start_time = time.time()
             from tqdm import tqdm
+            p_list = []
             for epoch in range(int(args.num_train_epochs)):
                 model.train()
                 logger.info("Start epoch #{} (lr = {})...".format(epoch, lr))
                 for step, batch in tqdm(enumerate(
                     cn_dataloader.get_training_batch_chinese(
-                        args, co_training = False)), 
+                        args, co_training = False, p_list = p_list)), 
                         total = args.num_iteration):
                     if step >= args.num_iteration:
+                        for p in p_list:
+                            if p.is_alive:
+                                p.terminate()
+                                p.join()
+
                         break
 
                     if n_gpu == 1:
@@ -1202,9 +1208,9 @@ def main_cotraining(args):
     logger.info(args)
 
     tokenizer = BertTokenizer.from_pretrained(
-        args.model, do_lower_case=args.do_lower_case)
+        args.tokenizer, do_lower_case=args.do_lower_case)
 
-    if args.do_train or (not args.eval_test):
+    if args.do_eval and (args.do_train or (not args.eval_test)):
         with gzip.GzipFile(args.dev_file, 'r') as reader:
             content = reader.read().decode('utf-8').strip().split('\n')[1:]
             eval_dataset = [json.loads(line) for line in content]
@@ -1350,12 +1356,20 @@ def main_cotraining(args):
             start_time = time.time()
             lmb_window_list_a = []
             lmb_window_list_b = []
+            from tqdm import tqdm
+            p_list = []
             for epoch in range(int(args.num_train_epochs)):
                 logger.info("Start epoch #{} (lr = {})...".format(epoch, lr))
-                for step, (batch_a, batch_b) in enumerate(
+                for step, (batch_a, batch_b) in tqdm(enumerate(
                     cn_dataloader.get_training_batch_chinese(
-                        args, co_training = True)):
+                        args, co_training = True, p_list = p_list)),
+                        total = args.num_iteration):
                     if step >= args.num_iteration:
+                        for p in p_list:
+                            if p.is_alive:
+                                p.terminate()
+                                p.join()
+
                         break
 
                     if n_gpu == 1:
@@ -1369,22 +1383,28 @@ def main_cotraining(args):
                     with torch.no_grad():
                         _, _, context_losses_a = model_a(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
                         _, _, context_losses_b = model_b(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
-                        _, _, self_context_losses_a = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
-                        _, _, self_context_losses_b = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+                        #_, _, self_context_losses_a = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+                        #_, _, self_context_losses_b = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
                     
                     lmb_list_a = [i for i in 
                         context_losses_b.detach().cpu().numpy()]
                     lmb_list_b = [i for i in 
                         context_losses_a.detach().cpu().numpy()]
                     
+                    if args.debug:
+                        print("context_losses_a", context_losses_a, "context_losses_b", context_losses_b)
+                        print('lmb_list_a', lmb_list_a, 'lmb_list_b', lmb_list_b)
+                        print("self_context_losses_a", self_context_losses_a, "self_context_losses_b", self_context_losses_b)
+                    
                     model_a.train()
                     model_b.train()
-                    if args.co_training_mode == 'moving_loss' and len(lmb_window_list_a) == args.moving_loss_num:
-                        if len(lmb_window_list_a) + args.train_batch_size <= args.moving_loss_num:
+                    if (args.co_training_mode == 'moving_loss' 
+                            and len(lmb_window_list_a) + args.train_batch_size >= args.moving_loss_num):
+                        if len(lmb_window_list_a) + args.train_batch_size == args.moving_loss_num:
                             lmb_window_list_a += lmb_list_a
                             lmb_window_list_b += lmb_list_b
                         else:
-                            pop_num = (args.moving_loss_num - 
+                            pop_num = abs(args.moving_loss_num - 
                                 len(lmb_window_list_a) - args.train_batch_size)
                             lmb_window_list_a = (
                                 lmb_window_list_a[pop_num:] + lmb_list_a)
@@ -1393,30 +1413,35 @@ def main_cotraining(args):
 
                         moving_loss_a = np.mean(lmb_window_list_a)
                         moving_loss_b = np.mean(lmb_window_list_b)
-                        lmbs_a = torch.Tensor([args.lmb 
+                        lmbs_a = torch.tensor([args.lmb 
                             if l <= moving_loss_a else 0. 
-                            for l in self_context_losses_a.detach().cpu().numpy()])
-                        lmbs_b = torch.Tensor([args.lmb 
+                            for l in lmb_list_a])
+                        lmbs_b = torch.tensor([args.lmb 
                             if l <= moving_loss_b else 0. 
-                            for l in self_context_losses_b.detach().cpu().numpy()])
-                        loss_a, _, _ = model_a(input_ids, segment_ids, input_mask, start_positions, end_positions, args.geometric_p, window_size=args.window_size, lmbs=lmbs_a)
-                        loss_b, _, _ = model_b(input_ids, segment_ids, input_mask, start_positions, end_positions, args.geometric_p, window_size=args.window_size, lmbs=lmbs_b)
+                            for l in lmb_list_b])
+                        if args.debug:
+                            print("moving_loss_a", moving_loss_a, "moving_loss_b", moving_loss_b)
+                            print("lmbs_a", lmbs_a, "lmbs_b", lmbs_b)
+                            input()
+
+                        loss_a, _, _ = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, lmbs_a, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+                        loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, lmbs_b, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
                     elif args.co_training_mode == 'data_cur':
-                        top_k_index_a = set(np.argsort(lmb_list_a)[:math.ceil(arg.theta * len(lmb_list_a))])
-                        top_k_index_b = set(np.argsort(lmb_list_b)[:math.ceil(arg.theta * len(lmb_list_b))])
-                        lmbs_a = torch.Tensor([
+                        top_k_index_a = set(np.argsort(lmb_list_a)[:math.ceil(args.theta * len(lmb_list_a))])
+                        top_k_index_b = set(np.argsort(lmb_list_b)[:math.ceil(args.theta * len(lmb_list_b))])
+                        lmbs_a = torch.tensor([
                                 args.lmb if idx in top_k_index_a else 0.
                                 for idx in range(len(lmb_list_a))
                                 ])
-                        lmbs_b = torch.Tensor([
+                        lmbs_b = torch.tensor([
                                 args.lmb if idx in top_k_index_b else 0.
                                 for idx in range(len(lmb_list_a))
                                 ])
-                        loss_a, _, _ = model_a(input_ids, segment_ids, input_mask, start_positions, end_positions, args.geometric_p, window_size=args.window_size, lmbs=lmbs_a)
-                        loss_b, _, _ = model_b(input_ids, segment_ids, input_mask, start_positions, end_positions, args.geometric_p, window_size=args.window_size, lmbs=lmbs_b)
+                        loss_a, _, _ = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, lmbs_a, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+                        loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, lmbs_b, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
                     else:
-                        loss_a, _, _ = model_a(input_ids, segment_ids, input_mask, start_positions, end_positions, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
-                        loss_b, _, _ = model_b(input_ids, segment_ids, input_mask, start_positions, end_positions, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+                        loss_a, _, _ = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+                        loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
                     
 
                     if n_gpu > 1:
@@ -1531,7 +1556,7 @@ def main_cotraining(args):
             eval_data = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_example_index)
             eval_dataloader = DataLoader(eval_data, batch_size=args.eval_batch_size)
         model_a, pretrained_weights_a = BLANC.from_pretrained(args.output_dir_a)
-        model_b, pretrained_weights_b = BLANC.from_pretrained(args.output_dir_a)
+        model_b, pretrained_weights_b = BLANC.from_pretrained(args.output_dir_b)
         if args.fp16:
             model_a.half()
             model_b.half()
@@ -1621,6 +1646,9 @@ if __name__ == "__main__":
         parser.add_argument('--co_training_mode', type=str, default='data_cur')
         parser.add_argument('--enqueue_thread_num', type=int, default=4)
         parser.add_argument('--is_co_training', type=bool, default=False)
+        parser.add_argument('--debug', type=bool, default=False)
+        parser.add_argument('--theta', type=float, default=0.8)
+        parser.add_argument('--moving_loss_num', type=int, default=8)
         args = parser.parse_args()
         args.output_dir_a = args.output_dir + "_a"
         args.output_dir_b = args.output_dir + "_b"

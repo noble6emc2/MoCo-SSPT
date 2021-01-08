@@ -1,4 +1,4 @@
-CUDA_VISIBLE_DEVICES=2,3 python3 src/lm/BLANC/run_mrqa_blanc_pretraining_chinese.py \
+PYTHONIOENCODING=utf-8 CUDA_VISIBLE_DEVICES=2,3 python3 src/lm/BLANC/run_mrqa_blanc_pretraining_chinese.py \
   --do_train \
   --model /home/mindahu/bert-base-chinese.tar.gz \
   --tokenizer /home/mindahu/bert-base-chinese-vocab.txt \
@@ -18,8 +18,10 @@ CUDA_VISIBLE_DEVICES=2,3 python3 src/lm/BLANC/run_mrqa_blanc_pretraining_chinese
   --geometric_p $GEOP \
   --window_size $WINS \
   --lmb $LMB \
-  --is_co_training \
+  --is_co_training true \
   --co_training_mode moving_loss\
   --enqueue_thread_num 2 \
   --num_iteration 37500 \
-  --debug
+  --moving_loss_num 8 \
+  --debug true \
+  --theta 0.8

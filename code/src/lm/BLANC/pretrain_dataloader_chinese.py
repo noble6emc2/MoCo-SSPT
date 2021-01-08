@@ -276,12 +276,12 @@ def get_training_batch_chinese(args, co_training: bool, p_list: list):
                 batch_segment_ids = torch.tensor([f.segment_ids for f, _ in feature_buffer], dtype=torch.long)
                 batch_start_positions = torch.tensor([f.start_positions for f, _ in feature_buffer], dtype=torch.long)
                 batch_end_positions = torch.tensor([f.end_positions for f, _ in feature_buffer], dtype=torch.long)
-                print("--------------------------")
-                for feature, _ in feature_buffer:
-                    print(feature)
-                    break
+                #print("------------co-training--------------")
+                #for feature, _ in feature_buffer:
+                #    print(feature)
+                #    break
 
-                print(len(feature_buffer))
+                #print(len(feature_buffer))
                 batch_a = batch_input_ids, batch_input_mask, batch_segment_ids, batch_start_positions, batch_end_positions
 
                 batch_input_ids = torch.tensor([f.input_ids for _, f in feature_buffer], dtype=torch.long)
@@ -289,12 +289,12 @@ def get_training_batch_chinese(args, co_training: bool, p_list: list):
                 batch_segment_ids = torch.tensor([f.segment_ids for _, f in feature_buffer], dtype=torch.long)
                 batch_start_positions = torch.tensor([f.start_positions for _, f in feature_buffer], dtype=torch.long)
                 batch_end_positions = torch.tensor([f.end_positions for _, f in feature_buffer], dtype=torch.long)
-                print("--------------------------")
-                for _, feature in feature_buffer:
-                    print(feature)
-                    break
+                #print("-------------co-training-------------")
+                #for _, feature in feature_buffer:
+                #    print(feature)
+                #    break
 
-                print(len(feature_buffer))
+                #print(len(feature_buffer))
                 batch_b = batch_input_ids, batch_input_mask, batch_segment_ids, batch_start_positions, batch_end_positions
 
                 yield batch_a, batch_b
