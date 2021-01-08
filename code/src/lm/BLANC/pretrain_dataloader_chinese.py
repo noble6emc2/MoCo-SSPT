@@ -47,7 +47,7 @@ def get_training_data_queue(args):
         cache = [None] * 10000
         first_time = True
         tokenizer = BertTokenizer.from_pretrained(
-            args.model, do_lower_case=args.do_lower_case)
+            args.tokenizer, do_lower_case=args.do_lower_case)
 
         while True:
             #print('first_time:', first_time)
@@ -120,14 +120,14 @@ def get_training_data_queue(args):
     return q
 
 
-def multi_process_get_training_data_queue(args, start, end):
+def multi_process_get_training_data_queue(args, start, end, p_list):
     def enqueue(q, offset):
         print("train file offset: ", offset)
         fi = open(args.train_file, 'rb')
         cache = [None] * 10000
         first_time = True
         tokenizer = BertTokenizer.from_pretrained(
-            args.model, do_lower_case=args.do_lower_case)
+            args.tokenizer, do_lower_case=args.do_lower_case)
 
         while True:
             #print('first_time:', first_time)
@@ -213,6 +213,8 @@ def multi_process_get_training_data_queue(args, start, end):
         print("enqueue process started : ", i, offset, offset / total_bytes)
         p = Process(target=enqueue, args=(q, offset))
         p.start()
+        p_list.append(p)
+
     return q
 
 
@@ -221,11 +223,11 @@ global_q_b = None
 global_q = None
 
 
-def get_training_batch_chinese(args, co_training: bool):
+def get_training_batch_chinese(args, co_training: bool, p_list: list):
     total_bytes = os.path.getsize(args.train_file)
     if not co_training:
         global global_q
-        q = multi_process_get_training_data_queue(args, 0, total_bytes)
+        q = multi_process_get_training_data_queue(args, 0, total_bytes, p_list)
         global_q = q
         feature_buffer = []
         batch_indicator = 0
@@ -253,9 +255,9 @@ def get_training_batch_chinese(args, co_training: bool):
         global global_q_b
         split_byte = np.random.rand() * total_bytes
         q_a = multi_process_get_training_data_queue(args, 
-            split_byte, (split_byte + total_bytes // 2) % total_bytes)
+            split_byte, (split_byte + total_bytes // 2) % total_bytes, p_list)
         q_b = multi_process_get_training_data_queue(args, 
-            (split_byte + total_bytes // 2) % total_bytes, split_byte)
+            (split_byte + total_bytes // 2) % total_bytes, split_byte, p_list)
         global_q_a = q_a
         global_q_b = q_b
         feature_buffer = []
@@ -278,6 +280,7 @@ def get_training_batch_chinese(args, co_training: bool):
                 for feature, _ in feature_buffer:
                     print(feature)
                     break
+
                 print(len(feature_buffer))
                 batch_a = batch_input_ids, batch_input_mask, batch_segment_ids, batch_start_positions, batch_end_positions
 
@@ -290,6 +293,7 @@ def get_training_batch_chinese(args, co_training: bool):
                 for _, feature in feature_buffer:
                     print(feature)
                     break
+
                 print(len(feature_buffer))
                 batch_b = batch_input_ids, batch_input_mask, batch_segment_ids, batch_start_positions, batch_end_positions
 

@@ -935,7 +935,7 @@ def main(args):
     logger.info(args)
 
     tokenizer = BertTokenizer.from_pretrained(
-        args.model, do_lower_case=args.do_lower_case)
+        args.tokenizer, do_lower_case=args.do_lower_case)
 
     if args.do_eval and (args.do_train or (not args.eval_test)):
         with gzip.GzipFile(args.dev_file, 'r') as reader:
@@ -1062,7 +1062,8 @@ def main(args):
                 logger.info("Start epoch #{} (lr = {})...".format(epoch, lr))
                 for step, batch in tqdm(enumerate(
                     cn_dataloader.get_training_batch_chinese(
-                        args, co_training = False))):
+                        args, co_training = False)), 
+                        total = args.num_iteration):
                     if step >= args.num_iteration:
                         break
 
@@ -1071,7 +1072,7 @@ def main(args):
 
                     input_ids, input_mask, segment_ids, start_positions, end_positions = batch
                     loss, _, _ = model(input_ids, segment_ids, input_mask, start_positions, end_positions, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
-                    print("step", step,"loss", loss)
+                    #print("step", step,"loss", loss)
 
                     if n_gpu > 1:
                         loss = loss.mean()
@@ -1558,6 +1559,7 @@ def main_cotraining(args):
 if __name__ == "__main__":
         parser = argparse.ArgumentParser()
         parser.add_argument("--model", default="bert-base-chinese", type=str, required=True)
+        parser.add_argument("--tokenizer", default="bert-base-chinese", type=str, required=True)
         parser.add_argument("--output_dir", default=None, type=str, required=True,
                             help="The output directory where the model checkpoints and predictions will be written.")
         parser.add_argument("--train_file", default=None, type=str)

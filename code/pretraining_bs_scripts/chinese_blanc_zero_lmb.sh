@@ -1,4 +1,4 @@
-CUDA_VISIBLE_DEVICES=0,1 python3 src/lm/BLANC/run_mrqa_blanc_pretraining_chinese.py \
+CUDA_VISIBLE_DEVICES=2,3 python3 src/lm/BLANC/run_mrqa_blanc_pretraining_chinese.py \
   --do_train \
   --model /home/mindahu/bert-base-chinese.tar.gz \
   --tokenizer /home/mindahu/bert-base-chinese-vocab.txt \

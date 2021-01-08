@@ -1,4 +1,4 @@
-CUDA_VISIBLE_DEVICES=0,1 python3 src/lm/BLANC/run_mrqa_blanc_pretraining_chinese.py \
+CUDA_VISIBLE_DEVICES=2,3 python3 src/lm/BLANC/run_mrqa_blanc_pretraining_chinese.py \
   --do_train \
   --model /home/mindahu/bert-base-chinese.tar.gz \
   --tokenizer /home/mindahu/bert-base-chinese-vocab.txt \
@@ -12,11 +12,14 @@ CUDA_VISIBLE_DEVICES=0,1 python3 src/lm/BLANC/run_mrqa_blanc_pretraining_chinese
   --max_seq_length 384 \
   --doc_stride 128 \
   --eval_metric span_f1 \
-  --output_dir ./checkpoints/pertraining_cn_bs/$LABEL/$SEED \
+  --output_dir ./checkpoints/pertraining_cn_cotraining/$LABEL/$SEED \
   --eval_per_epoch 20 \
   --seed $SEED \
   --geometric_p $GEOP \
   --window_size $WINS \
   --lmb $LMB \
+  --is_co_training \
+  --co_training_mode moving_loss\
   --enqueue_thread_num 2 \
-  --num_iteration 37500
+  --num_iteration 37500 \
+  --debug
