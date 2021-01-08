@@ -1301,10 +1301,10 @@ def main_cotraining(args):
                 model_b.half()
 
             model_a.to(device_a)
-            model_b.to(device_b)
+            model_b.to(device_a)
             if n_gpu > 1:
                 model_a = torch.nn.DataParallel(model_a, device_ids = [0, 1])
-                model_b = torch.nn.DataParallel(model_b, device_ids = [2, 3])
+                model_b = torch.nn.DataParallel(model_b, device_ids = [0, 1])
 
             param_optimizer_a = list(model_a.named_parameters())
             param_optimizer_b = list(model_b.named_parameters())
