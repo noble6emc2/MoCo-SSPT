@@ -1437,6 +1437,7 @@ def main_cotraining(args):
                             if l <= moving_loss_b else 0. 
                             for l in lmb_list_b])
                         if args.debug:
+                            print("lmb_window_list_a", lmb_window_list_a, "lmb_window_list_b", lmb_window_list_b)
                             print("moving_loss_a", moving_loss_a, "moving_loss_b", moving_loss_b)
                             print("lmbs_a", lmbs_a, "lmbs_b", lmbs_b)
                             input()
@@ -1466,6 +1467,9 @@ def main_cotraining(args):
                     else:
                         loss_a, _, _ = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
                         loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+                        if args.co_training_mode == 'moving_loss':
+                            lmb_window_list_a += lmb_list_a
+                            lmb_window_list_b += lmb_list_b
                     
 
                     if n_gpu > 1:
