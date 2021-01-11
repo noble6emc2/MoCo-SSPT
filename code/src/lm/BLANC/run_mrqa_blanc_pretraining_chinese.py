@@ -905,6 +905,12 @@ def main(args):
     logger.info("device: {}, n_gpu: {}, 16-bits training: {}".format(
         device, n_gpu, args.fp16))
 
+    from torch.utils.tensorboard import SummaryWriter
+    # default `log_dir` is "runs" - we'll be more specific here
+    writer = SummaryWriter(
+        os.path.join(args.output_dir, "baseline_training_loss/" % args.moving_loss_num 
+        + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")))
+
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -1063,6 +1069,7 @@ def main(args):
             for epoch in range(int(args.num_train_epochs)):
                 model.train()
                 logger.info("Start epoch #{} (lr = {})...".format(epoch, lr))
+                running_loss = 0.0
                 for step, batch in tqdm(enumerate(
                     cn_dataloader.get_training_batch_chinese(
                         args, co_training = False, p_list = p_list)), 
@@ -1101,6 +1108,13 @@ def main(args):
                         optimizer.step()
                         optimizer.zero_grad()
                         global_step += 1
+
+                    running_loss += loss.item()
+                    if (step + 1) % 500 == 0:
+                       writer.add_scalar('Training loss of baseline with lmb %s' % str(args.lmb),
+                            running_loss / 500,
+                            epoch * args.num_iteration + step + 1)
+                       running_loss = 0.0
 
                     if (step + 1) % eval_step == 0:
                         logger.info('Epoch: {}, Step: {} / {}, used_time = {:.2f}s'.format(
@@ -1374,10 +1388,10 @@ def main_cotraining(args):
             lmb_window_list_b = []
             from tqdm import tqdm
             p_list = []
-            running_loss_a = 0.0
-            running_loss_b = 0.0
             for epoch in range(int(args.num_train_epochs)):
                 logger.info("Start epoch #{} (lr = {})...".format(epoch, lr))
+                running_loss_a = 0.0
+                running_loss_b = 0.0
                 for step, (batch_a, batch_b) in tqdm(enumerate(
                     cn_dataloader.get_training_batch_chinese(
                         args, co_training = True, p_list = p_list)),
@@ -1419,6 +1433,9 @@ def main_cotraining(args):
                     
                     model_a.train()
                     model_b.train()
+
+                    if step_ratio < args.moving_loss_warmup_ratio:
+                        raise NotImplementedError
                     if (args.co_training_mode == 'moving_loss' and step_ratio >= args.moving_loss_warmup_ratio
                             and len(lmb_window_list_a) + args.train_batch_size >= args.moving_loss_num):
                         if len(lmb_window_list_a) + args.train_batch_size == args.moving_loss_num:
