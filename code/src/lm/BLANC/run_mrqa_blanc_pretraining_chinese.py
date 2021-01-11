@@ -1394,7 +1394,7 @@ def main_cotraining(args):
                         batch_a = tuple(t.to(device) for t in batch_a)
                         batch_b = tuple(t.to(device) for t in batch_b)
 
-                    step_ratio = global_step / args.num_iteration
+                    step_ratio = global_step * args.gradient_accumulation_steps / args.num_iteration
                     #Warm up in order to make Model A/B's hypothesis different
                     if  step_ratio >= args.moving_loss_warmup_ratio:
                         model_a.eval()
