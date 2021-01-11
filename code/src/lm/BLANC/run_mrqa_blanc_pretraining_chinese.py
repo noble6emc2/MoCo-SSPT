@@ -1434,8 +1434,8 @@ def main_cotraining(args):
                     model_a.train()
                     model_b.train()
 
-                    if step_ratio < args.moving_loss_warmup_ratio:
-                        raise NotImplementedError
+                    #if step_ratio < args.moving_loss_warmup_ratio:
+                    #    raise NotImplementedError
                     if (args.co_training_mode == 'moving_loss' and step_ratio >= args.moving_loss_warmup_ratio
                             and len(lmb_window_list_a) + args.train_batch_size >= args.moving_loss_num):
                         if len(lmb_window_list_a) + args.train_batch_size == args.moving_loss_num:
@@ -1465,7 +1465,7 @@ def main_cotraining(args):
 
                         loss_a, _, _ = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, lmbs_a, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
                         loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, lmbs_b, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
-                    elif args.co_training_mode == 'data_cur' and global_step >= args.moving_loss_warmup_ratio:
+                    elif args.co_training_mode == 'data_cur' and step_ratio >= args.moving_loss_warmup_ratio:
                         top_k_index_a = set(np.argsort(lmb_list_a)[:math.ceil(args.theta * len(lmb_list_a))])
                         top_k_index_b = set(np.argsort(lmb_list_b)[:math.ceil(args.theta * len(lmb_list_b))])
 
