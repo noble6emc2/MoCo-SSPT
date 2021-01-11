@@ -12,15 +12,15 @@ PYTHONIOENCODING=utf-8 CUDA_VISIBLE_DEVICES=0,1 python3 src/lm/BLANC/run_mrqa_bl
   --max_seq_length 384 \
   --doc_stride 128 \
   --eval_metric span_f1 \
-  --output_dir ./checkpoints/pertraining_cn_cotraining/$LABEL/$SEED \
+  --output_dir ./checkpoints/pertraining_cn_cotraining_data_cur/$LABEL/$SEED \
   --eval_per_epoch 20 \
   --seed $SEED \
   --geometric_p $GEOP \
   --window_size $WINS \
   --lmb $LMB \
   --is_co_training true \
-  --co_training_mode moving_loss\
+  --co_training_mode data_cur\
   --enqueue_thread_num 2 \
   --num_iteration 37500 \
-  --moving_loss_num 32 \
-  --theta 0.8
+  --moving_loss_num 8 \
+  --theta $THETA

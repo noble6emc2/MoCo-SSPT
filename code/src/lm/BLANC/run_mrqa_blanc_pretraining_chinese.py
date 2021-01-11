@@ -1171,6 +1171,13 @@ def main(args):
                 writer.write("%s = %s\n" % (key, str(result[key])))
 
 def main_cotraining(args):
+    from torch.utils.tensorboard import SummaryWriter
+    # default `log_dir` is "runs" - we'll be more specific here
+    if args.co_training_mode == 'moving_loss':
+        writer = SummaryWriter(os.path.join(args.output_dir_a, "co_training_moving_loss_num_%d" % args.moving_loss_num))
+    else:
+        writer = SummaryWriter(os.path.join(args.output_dir_a, "co_training_data_cur_theta_%s" % str(args.theta)))
+
     device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
     n_gpu = torch.cuda.device_count()
     logger.info("device: {}, n_gpu: {}, 16-bits training: {}".format(
@@ -1291,6 +1298,8 @@ def main_cotraining(args):
 
         eval_step = max(1, args.num_iteration // args.eval_per_epoch)
         best_result = None
+        result_a = None
+        result_b = None
         lrs = [args.learning_rate] if args.learning_rate else [1e-6, 2e-6, 3e-6, 5e-6, 1e-5, 2e-5, 3e-5, 5e-5]
         for lr in lrs:
             model_a, pretrained_weights_a = BLANC.from_pretrained(
@@ -1361,6 +1370,8 @@ def main_cotraining(args):
             lmb_window_list_b = []
             from tqdm import tqdm
             p_list = []
+            running_loss_a = 0.0
+            running_loss_b = 0.0
             for epoch in range(int(args.num_train_epochs)):
                 logger.info("Start epoch #{} (lr = {})...".format(epoch, lr))
                 for step, (batch_a, batch_b) in tqdm(enumerate(
@@ -1432,14 +1443,21 @@ def main_cotraining(args):
                     elif args.co_training_mode == 'data_cur':
                         top_k_index_a = set(np.argsort(lmb_list_a)[:math.ceil(args.theta * len(lmb_list_a))])
                         top_k_index_b = set(np.argsort(lmb_list_b)[:math.ceil(args.theta * len(lmb_list_b))])
+
                         lmbs_a = torch.tensor([
                                 args.lmb if idx in top_k_index_a else 0.
                                 for idx in range(len(lmb_list_a))
                                 ])
                         lmbs_b = torch.tensor([
                                 args.lmb if idx in top_k_index_b else 0.
-                                for idx in range(len(lmb_list_a))
+                                for idx in range(len(lmb_list_b))
                                 ])
+                        
+                        if args.debug:
+                            print("top_k_index_a", top_k_index_a, "top_k_index_b", top_k_index_b)
+                            print("lmbs_a", lmbs_a, "lmbs_b", lmbs_b)
+                            input()
+                        
                         loss_a, _, _ = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, lmbs_a, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
                         loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, lmbs_b, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
                     else:
@@ -1476,6 +1494,19 @@ def main_cotraining(args):
                         optimizer_b.step()
                         optimizer_b.zero_grad()
                         global_step += 1
+ 
+                    running_loss_a += loss_a.item()
+                    running_loss_b += loss_b.item()
+                    if (step + 1) % 500 == 0:
+                       writer.add_scalar('Training loss(Model A)',
+                            running_loss_a / 500,
+                            epoch * args.num_iteration + step + 1)
+                       writer.add_scalar('Training loss(Model B)',
+                            running_loss_b / 500,
+                            epoch * args.num_iteration + step + 1)
+
+                       running_loss_a = 0.0
+                       running_loss_b = 0.0
 
                     if (step + 1) % eval_step == 0:
                         logger.info('Epoch: {}, Step: {} / {}, used_time = {:.2f}s'.format(
