@@ -1,3 +1,4 @@
 {
-    "python.pythonPath": "/Users/noble6emc2/anaconda3/bin/python"
+    "python.pythonPath": "/Users/noble6emc2/anaconda3/bin/python",
+    "python.envFile": "${workspaceFolder}/.vscode/.env"
 }

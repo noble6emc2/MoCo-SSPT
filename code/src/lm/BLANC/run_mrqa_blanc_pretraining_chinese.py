@@ -21,6 +21,7 @@ import re
 import math
 from torch import nn
 from io import open
+sys.path.append(os.path.dirname(__file__))
 
 import numpy as np
 import torch
@@ -953,13 +954,13 @@ def main(args):
             max_query_length=args.max_query_length,
             is_training=False)
         '''
-        eval_examples = p_cn.read_chinese_examples(
+        eval_examples = read_chinese_examples(
                 line_list=content, is_training=True, 
                 first_answer_only=True, 
                 replace_mask="[unused1]",
                 do_lower_case=True,
                 remove_query_in_passage=True)
-        eval_features = p_cn.convert_chinese_examples_to_features(
+        eval_features = convert_chinese_examples_to_features(
                     examples=eval_examples,
                     tokenizer=tokenizer,
                     max_seq_length=args.max_seq_length,
@@ -1078,7 +1079,7 @@ def main(args):
                         batch = tuple(t.to(device) for t in batch)
 
                     input_ids, input_mask, segment_ids, start_positions, end_positions = batch
-                    loss, _, _ = model(input_ids, segment_ids, input_mask, start_positions, end_positions, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+                    loss, _, _ = model(input_ids, segment_ids, input_mask, start_positions, end_positions, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
                     #print("step", step,"loss", loss)
 
                     if n_gpu > 1:
@@ -1238,13 +1239,13 @@ def main_cotraining(args):
             max_query_length=args.max_query_length,
             is_training=False)
         '''
-        eval_examples = p_cn.read_chinese_examples(
+        eval_examples = read_chinese_examples(
                 line_list=content, is_training=True, 
                 first_answer_only=True, 
                 replace_mask="[unused1]",
                 do_lower_case=True,
                 remove_query_in_passage=True)
-        eval_features = p_cn.convert_chinese_examples_to_features(
+        eval_features = convert_chinese_examples_to_features(
                     examples=eval_examples,
                     tokenizer=tokenizer,
                     max_seq_length=args.max_seq_length,
@@ -1398,8 +1399,8 @@ def main_cotraining(args):
                     input_ids_a, input_mask_a, segment_ids_a, start_positions_a, end_positions_a = batch_a
                     input_ids_b, input_mask_b, segment_ids_b, start_positions_b, end_positions_b = batch_b
                     with torch.no_grad():
-                        _, _, context_losses_a = model_a(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
-                        _, _, context_losses_b = model_b(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+                        _, _, context_losses_a = model_a(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+                        _, _, context_losses_b = model_b(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
                         #_, _, self_context_losses_a = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
                         #_, _, self_context_losses_b = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
                     
@@ -1442,8 +1443,8 @@ def main_cotraining(args):
                             print("lmbs_a", lmbs_a, "lmbs_b", lmbs_b)
                             input()
 
-                        loss_a, _, _ = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, lmbs_a, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
-                        loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, lmbs_b, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+                        loss_a, _, _ = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, lmbs_a, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+                        loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, lmbs_b, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
                     elif args.co_training_mode == 'data_cur':
                         top_k_index_a = set(np.argsort(lmb_list_a)[:math.ceil(args.theta * len(lmb_list_a))])
                         top_k_index_b = set(np.argsort(lmb_list_b)[:math.ceil(args.theta * len(lmb_list_b))])
@@ -1462,11 +1463,11 @@ def main_cotraining(args):
                             print("lmbs_a", lmbs_a, "lmbs_b", lmbs_b)
                             input()
                         
-                        loss_a, _, _ = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, lmbs_a, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
-                        loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, lmbs_b, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+                        loss_a, _, _ = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, lmbs_a, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+                        loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, lmbs_b, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
                     else:
-                        loss_a, _, _ = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
-                        loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+                        loss_a, _, _ = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+                        loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
                         if args.co_training_mode == 'moving_loss':
                             lmb_window_list_a += lmb_list_a
                             lmb_window_list_b += lmb_list_b
