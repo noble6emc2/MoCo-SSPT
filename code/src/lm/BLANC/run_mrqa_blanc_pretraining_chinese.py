@@ -1394,29 +1394,32 @@ def main_cotraining(args):
                         batch_a = tuple(t.to(device) for t in batch_a)
                         batch_b = tuple(t.to(device) for t in batch_b)
 
-                    model_a.eval()
-                    model_b.eval()
-                    input_ids_a, input_mask_a, segment_ids_a, start_positions_a, end_positions_a = batch_a
-                    input_ids_b, input_mask_b, segment_ids_b, start_positions_b, end_positions_b = batch_b
-                    with torch.no_grad():
-                        _, _, context_losses_a = model_a(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
-                        _, _, context_losses_b = model_b(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
-                        #_, _, self_context_losses_a = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
-                        #_, _, self_context_losses_b = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
-                    
-                    lmb_list_a = [i for i in 
-                        context_losses_b.detach().cpu().numpy()]
-                    lmb_list_b = [i for i in 
-                        context_losses_a.detach().cpu().numpy()]
-                    
-                    if args.debug:
-                        print("context_losses_a", context_losses_a, "context_losses_b", context_losses_b)
-                        print('lmb_list_a', lmb_list_a, 'lmb_list_b', lmb_list_b)
-                        #print("self_context_losses_a", self_context_losses_a, "self_context_losses_b", self_context_losses_b)
+                    step_ratio = global_step / args.num_iteration
+                    #Warm up in order to make Model A/B's hypothesis different
+                    if  step_ratio >= args.moving_loss_warmup_ratio:
+                        model_a.eval()
+                        model_b.eval()
+                        input_ids_a, input_mask_a, segment_ids_a, start_positions_a, end_positions_a = batch_a
+                        input_ids_b, input_mask_b, segment_ids_b, start_positions_b, end_positions_b = batch_b
+                        with torch.no_grad():
+                            _, _, context_losses_a = model_a(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+                            _, _, context_losses_b = model_b(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+                            #_, _, self_context_losses_a = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+                            #_, _, self_context_losses_b = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+                        
+                        lmb_list_a = [i for i in 
+                            context_losses_b.detach().cpu().numpy()]
+                        lmb_list_b = [i for i in 
+                            context_losses_a.detach().cpu().numpy()]
+                        
+                        if args.debug:
+                            print("context_losses_a", context_losses_a, "context_losses_b", context_losses_b)
+                            print('lmb_list_a', lmb_list_a, 'lmb_list_b', lmb_list_b)
+                            #print("self_context_losses_a", self_context_losses_a, "self_context_losses_b", self_context_losses_b)
                     
                     model_a.train()
                     model_b.train()
-                    if (args.co_training_mode == 'moving_loss' 
+                    if (args.co_training_mode == 'moving_loss' and step_ratio >= args.moving_loss_warmup_ratio
                             and len(lmb_window_list_a) + args.train_batch_size >= args.moving_loss_num):
                         if len(lmb_window_list_a) + args.train_batch_size == args.moving_loss_num:
                             lmb_window_list_a += lmb_list_a
@@ -1468,7 +1471,7 @@ def main_cotraining(args):
                     else:
                         loss_a, _, _ = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
                         loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
-                        if args.co_training_mode == 'moving_loss':
+                        if args.co_training_mode == 'moving_loss' and step_ratio >= args.moving_loss_warmup_ratio:
                             lmb_window_list_a += lmb_list_a
                             lmb_window_list_b += lmb_list_b
                     
@@ -1690,6 +1693,7 @@ if __name__ == "__main__":
         parser.add_argument('--is_co_training', type=bool, default=False)
         parser.add_argument('--debug', type=bool, default=False)
         parser.add_argument('--theta', type=float, default=0.8)
+        parser.add_argument('--moving_loss_warmup_ratio', type=float, default=0.3)
         parser.add_argument('--moving_loss_num', type=int, default=8)
         args = parser.parse_args()
         args.output_dir_a = args.output_dir + "_a"
