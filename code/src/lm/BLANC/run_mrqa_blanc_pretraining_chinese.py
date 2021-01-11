@@ -908,7 +908,7 @@ def main(args):
     from torch.utils.tensorboard import SummaryWriter
     # default `log_dir` is "runs" - we'll be more specific here
     writer = SummaryWriter(
-        os.path.join(args.output_dir, "baseline_training_loss/" % args.moving_loss_num 
+        os.path.join(args.output_dir, "baseline_training_loss_lmb_%s/" % str(args.lmb) 
         + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")))
 
     random.seed(args.seed)
