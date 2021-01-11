@@ -1394,7 +1394,7 @@ def main_cotraining(args):
                         batch_a = tuple(t.to(device) for t in batch_a)
                         batch_b = tuple(t.to(device) for t in batch_b)
 
-                    step_ratio = global_step * args.gradient_accumulation_steps / args.num_iteration
+                    step_ratio = global_step / num_train_optimization_steps
                     #Warm up in order to make Model A/B's hypothesis different
                     if  step_ratio >= args.moving_loss_warmup_ratio:
                         model_a.eval()
@@ -1448,7 +1448,7 @@ def main_cotraining(args):
 
                         loss_a, _, _ = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, lmbs_a, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
                         loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, lmbs_b, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
-                    elif args.co_training_mode == 'data_cur':
+                    elif args.co_training_mode == 'data_cur' and global_step >= args.moving_loss_warmup_ratio:
                         top_k_index_a = set(np.argsort(lmb_list_a)[:math.ceil(args.theta * len(lmb_list_a))])
                         top_k_index_b = set(np.argsort(lmb_list_b)[:math.ceil(args.theta * len(lmb_list_b))])
 
