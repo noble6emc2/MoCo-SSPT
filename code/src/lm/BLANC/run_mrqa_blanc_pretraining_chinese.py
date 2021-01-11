@@ -25,6 +25,7 @@ from io import open
 import numpy as np
 import torch
 import pretrain_dataloader_chinese as cn_dataloader
+import datetime
 from torch.utils.data import DataLoader, TensorDataset
 from pytorch_pretrained_bert.file_utils import PYTORCH_PRETRAINED_BERT_CACHE
 from pytorch_pretrained_bert.file_utils import WEIGHTS_NAME, CONFIG_NAME
@@ -1174,9 +1175,9 @@ def main_cotraining(args):
     from torch.utils.tensorboard import SummaryWriter
     # default `log_dir` is "runs" - we'll be more specific here
     if args.co_training_mode == 'moving_loss':
-        writer = SummaryWriter(os.path.join(args.output_dir_a, "co_training_moving_loss_num_%d" % args.moving_loss_num))
+        writer = SummaryWriter(os.path.join(args.output_dir_a, "co_training_moving_loss_num_%d/" % args.moving_loss_num + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")))
     else:
-        writer = SummaryWriter(os.path.join(args.output_dir_a, "co_training_data_cur_theta_%s" % str(args.theta)))
+        writer = SummaryWriter(os.path.join(args.output_dir_a, "co_training_data_cur_theta_%s/" % str(args.theta) + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")))
 
     device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
     n_gpu = torch.cuda.device_count()
@@ -1209,6 +1210,8 @@ def main_cotraining(args):
     if not os.path.exists(args.output_dir_a):
         #os.makedirs(args.output_dir)
         os.makedirs(args.output_dir_a)
+
+    if not os.path.exists(args.output_dir_b):
         os.makedirs(args.output_dir_b)
 
     if args.do_train:
