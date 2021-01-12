@@ -1410,11 +1410,11 @@ def main_cotraining(args):
 
                     step_ratio = global_step / num_train_optimization_steps
                     #Warm up in order to make Model A/B's hypothesis different
+                    input_ids_a, input_mask_a, segment_ids_a, start_positions_a, end_positions_a = batch_a
+                    input_ids_b, input_mask_b, segment_ids_b, start_positions_b, end_positions_b = batch_b
                     if  step_ratio >= args.moving_loss_warmup_ratio:
                         model_a.eval()
                         model_b.eval()
-                        input_ids_a, input_mask_a, segment_ids_a, start_positions_a, end_positions_a = batch_a
-                        input_ids_b, input_mask_b, segment_ids_b, start_positions_b, end_positions_b = batch_b
                         with torch.no_grad():
                             _, _, context_losses_a = model_a(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
                             _, _, context_losses_b = model_b(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
