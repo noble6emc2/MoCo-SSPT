@@ -198,6 +198,11 @@ def read_chinese_examples(line_list, is_training,
     def is_whitespace(c):
         if c == " " or c == "\t" or c == "\r" or c == "\n" or ord(c) == 0x202F:
             return True
+
+        cat = unicodedata.category(c)
+        if cat == "Zs":
+            return True
+            
         return False
 
     examples = []
@@ -1412,85 +1417,75 @@ def main_cotraining(args):
                     #Warm up in order to make Model A/B's hypothesis different
                     input_ids_a, input_mask_a, segment_ids_a, start_positions_a, end_positions_a = batch_a
                     input_ids_b, input_mask_b, segment_ids_b, start_positions_b, end_positions_b = batch_b
-                    if  step_ratio >= args.moving_loss_warmup_ratio:
+                    if step_ratio < args.moving_loss_warmup_ratio:
+                        # warming up stage
+                        model_a.train()
+                        model_b.train()
+                        
+                        loss_a, _, _ = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+                        loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+                    else:
+                        # co-training stage
                         model_a.eval()
                         model_b.eval()
+
                         with torch.no_grad():
                             _, _, context_losses_a = model_a(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
                             _, _, context_losses_b = model_b(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
-                            #_, _, self_context_losses_a = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
-                            #_, _, self_context_losses_b = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, args.geometric_p, window_size=args.window_size, lmb=args.lmb)
-                        
-                        lmb_list_a = [i for i in 
-                            context_losses_b.detach().cpu().numpy()]
-                        lmb_list_b = [i for i in 
-                            context_losses_a.detach().cpu().numpy()]
-                        
-                        if args.debug:
-                            print("context_losses_a", context_losses_a, "context_losses_b", context_losses_b)
-                            print('lmb_list_a', lmb_list_a, 'lmb_list_b', lmb_list_b)
-                            #print("self_context_losses_a", self_context_losses_a, "self_context_losses_b", self_context_losses_b)
-                    
-                    model_a.train()
-                    model_b.train()
 
-                    #if step_ratio < args.moving_loss_warmup_ratio:
-                    #    raise NotImplementedError
-                    if (args.co_training_mode == 'moving_loss' and step_ratio >= args.moving_loss_warmup_ratio
-                            and len(lmb_window_list_a) + args.train_batch_size >= args.moving_loss_num):
-                        if len(lmb_window_list_a) + args.train_batch_size == args.moving_loss_num:
-                            lmb_window_list_a += lmb_list_a
-                            lmb_window_list_b += lmb_list_b
+                            lmb_list_a = [i for i in context_losses_b.detach().cpu().numpy()]
+                            lmb_list_b = [i for i in context_losses_a.detach().cpu().numpy()]
+
+                            if args.debug:
+                                print("context_losses_a", context_losses_a, "context_losses_b", context_losses_b)
+                                print('lmb_list_a', lmb_list_a, 'lmb_list_b', lmb_list_b)
+
+                        model_a.train()
+                        model_b.train()
+
+                        if args.co_training_mode == 'moving_loss':
+                            if len(lmb_window_list_a) + args.train_batch_size > args.moving_loss_num:
+                                pop_num = abs(args.moving_loss_num - len(lmb_window_list_a) - args.train_batch_size)
+                                lmb_window_list_a = (lmb_window_list_a[pop_num:] + lmb_list_a)
+                                lmb_window_list_b = (lmb_window_list_b[pop_num:] + lmb_list_b)
+                            else:
+                                lmb_window_list_a += lmb_list_a
+                                lmb_window_list_b += lmb_list_b
+                            
+                            moving_loss_a = np.mean(lmb_window_list_a)
+                            moving_loss_b = np.mean(lmb_window_list_b)
+
+                            lmbs_a = torch.tensor([args.lmb if l <= moving_loss_a else 0. for l in lmb_list_a])
+                            lmbs_b = torch.tensor([args.lmb if l <= moving_loss_b else 0. for l in lmb_list_b])
+
+                            if args.debug:
+                                print("lmb_window_list_a", lmb_window_list_a, "lmb_window_list_b", lmb_window_list_b)
+                                print("moving_loss_a", moving_loss_a, "moving_loss_b", moving_loss_b)
+                                print("lmbs_a", lmbs_a, "lmbs_b", lmbs_b)
+                                input()
+
+                            loss_a, _, _ = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, lmbs_a, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+                            loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, lmbs_b, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+                        elif args.co_training_mode == 'data_cur':
+                            top_k_index_a = set(np.argsort(lmb_list_a)[:math.ceil(args.theta * len(lmb_list_a))])
+                            top_k_index_b = set(np.argsort(lmb_list_b)[:math.ceil(args.theta * len(lmb_list_b))])
+
+                            lmbs_a = torch.tensor([args.lmb if idx in top_k_index_a else 0.
+                                                    for idx in range(len(lmb_list_a))])
+                            lmbs_b = torch.tensor([args.lmb if idx in top_k_index_b else 0.
+                                                    for idx in range(len(lmb_list_b))])
+                                            
+                            if args.debug:
+                                print("top_k_index_a", top_k_index_a, "top_k_index_b", top_k_index_b)
+                                print("lmbs_a", lmbs_a, "lmbs_b", lmbs_b)
+                                input()
+
+                            loss_a, _, _ = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, lmbs_a, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+                            loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, lmbs_b, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
                         else:
-                            pop_num = abs(args.moving_loss_num - 
-                                len(lmb_window_list_a) - args.train_batch_size)
-                            lmb_window_list_a = (
-                                lmb_window_list_a[pop_num:] + lmb_list_a)
-                            lmb_window_list_b = (
-                                lmb_window_list_b[pop_num:] + lmb_list_b)
+                            raise Exception("Unsuppoted co training mode.")
 
-                        moving_loss_a = np.mean(lmb_window_list_a)
-                        moving_loss_b = np.mean(lmb_window_list_b)
-                        lmbs_a = torch.tensor([args.lmb 
-                            if l <= moving_loss_a else 0. 
-                            for l in lmb_list_a])
-                        lmbs_b = torch.tensor([args.lmb 
-                            if l <= moving_loss_b else 0. 
-                            for l in lmb_list_b])
-                        if args.debug:
-                            print("lmb_window_list_a", lmb_window_list_a, "lmb_window_list_b", lmb_window_list_b)
-                            print("moving_loss_a", moving_loss_a, "moving_loss_b", moving_loss_b)
-                            print("lmbs_a", lmbs_a, "lmbs_b", lmbs_b)
-                            input()
 
-                        loss_a, _, _ = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, lmbs_a, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
-                        loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, lmbs_b, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
-                    elif args.co_training_mode == 'data_cur' and step_ratio >= args.moving_loss_warmup_ratio:
-                        top_k_index_a = set(np.argsort(lmb_list_a)[:math.ceil(args.theta * len(lmb_list_a))])
-                        top_k_index_b = set(np.argsort(lmb_list_b)[:math.ceil(args.theta * len(lmb_list_b))])
-
-                        lmbs_a = torch.tensor([
-                                args.lmb if idx in top_k_index_a else 0.
-                                for idx in range(len(lmb_list_a))
-                                ])
-                        lmbs_b = torch.tensor([
-                                args.lmb if idx in top_k_index_b else 0.
-                                for idx in range(len(lmb_list_b))
-                                ])
-                        
-                        if args.debug:
-                            print("top_k_index_a", top_k_index_a, "top_k_index_b", top_k_index_b)
-                            print("lmbs_a", lmbs_a, "lmbs_b", lmbs_b)
-                            input()
-                        
-                        loss_a, _, _ = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, lmbs_a, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
-                        loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, lmbs_b, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
-                    else:
-                        loss_a, _, _ = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
-                        loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
-                        if args.co_training_mode == 'moving_loss' and step_ratio >= args.moving_loss_warmup_ratio:
-                            lmb_window_list_a += lmb_list_a
-                            lmb_window_list_b += lmb_list_b
                     
 
                     if n_gpu > 1:
@@ -1643,6 +1638,449 @@ def main_cotraining(args):
                 writer.write("%s = %s\n" % (key, str(result_b[key])))
 
 
+def read_crmc_examples(input_file, is_training, 
+    first_answer_only, do_lower_case,
+    remove_query_in_passage):
+    """Read crmc json file for pretraining into a list of MRQAExample."""
+    with open(input_file, 'r') as fin:
+        # skip header
+        input_js = json.load(fin)
+        input_data = input_js["data"]
+
+    def is_whitespace(c):
+        if c == " " or c == "\t" or c == "\r" or c == "\n" or ord(c) == 0x202F:
+            return True
+
+        cat = unicodedata.category(c)
+        if cat == "Zs":
+            return True
+            
+        return False
+
+    examples = []
+    num_answers = 0
+    for i, article in enumerate(input_data):
+        for entry in article["paragraphs"]:
+            paragraph_text = entry["context"].strip()
+            raw_doc_tokens = tokenize_chinese(paragraph_text, 
+                    masking = None,
+                    do_lower_case= do_lower_case)
+            doc_tokens = []
+            char_to_word_offset = []
+            prev_is_whitespace = True
+            
+            k = 0
+            temp_word = ""
+            for c in paragraph_text:
+                if is_whitespace(c):
+                    char_to_word_offset.append(k - 1)
+                    continue
+                else:
+                    temp_word += c
+                    char_to_word_offset.append(k)
+
+                if do_lower_case:
+                    temp_word = temp_word.lower()
+
+                if temp_word == raw_doc_tokens[k]:
+                    doc_tokens.append(temp_word)
+                    temp_word = ""
+                    k += 1
+
+            if k != len(raw_doc_tokens):
+                logger.info("Warning: paragraph '{}' tokenization error'{}'".format(paragraph_text))
+                continue
+
+            for qa in entry["qas"]:
+                qas_id = article["id"] + "_" + entry["id"] + "_" + qa["id"]
+                '''if qa["question"].find('UNK') == -1:
+                    logger.info(f"WARNING: Cannot Find UNK in Question %s" % qas_id)
+                    continue'''
+
+                if remove_query_in_passage:
+                    query = qa["question"]
+                    mask_start = query.find("UNK")
+                    mask_end = mask_start + 3
+                    pattern = (re.escape(unicodedata.normalize('NFKC', query[:mask_start].strip())) + 
+                        ".*" + re.escape(unicodedata.normalize('NFKC', query[mask_end:].strip())))
+                    if re.search(pattern,
+                        unicodedata.normalize('NFKC', paragraph_text)) is not None:
+                        #print(f"WARNING: Query in Passage Detected in Question %s" % qas_id)
+                        #print("Question", query, "Passage", paragraph_text)
+                        continue
+
+                question_text = qa["question"]# .replace("UNK", replace_mask)
+                is_impossible = qa.get('is_impossible', False)
+                start_position = None
+                end_position = None
+                orig_answer_text = None
+                
+                answers = qa["answers"]
+                num_answers += len(answers)
+                
+                # import ipdb
+                # ipdb.set_trace()
+                '''
+                [
+                    [ans['answer_start'] + 1, 
+                    ans['answer_start'] + len(ans['text']), 
+                    ans['text']] 
+                    for ans in answers]
+                '''
+                ans_list = []
+                for ans in answers:
+                    if ans['answer_start'] == -1:
+                        continue
+
+                    if paragraph_text[ans['answer_start']:].startswith(ans['text']):
+                        ans_list.append([ans['answer_start'], 
+                            ans['answer_start'] + len(ans['text']) - 1, 
+                            ans['text']]
+                            )
+                    elif paragraph_text[ans['answer_start'] - 2:].startswith(ans['text']):
+                        ans_list.append([ans['answer_start'] - 2, 
+                            ans['answer_start'] + len(ans['text']) - 3, 
+                            ans['text']]
+                            )
+                    else:
+                        ans_list.append([ans['answer_start'] - 1, 
+                            ans['answer_start'] + len(ans['text']) - 2, 
+                            ans['text']]
+                            )
+
+                spans = sorted(ans_list)
+                #print("spans", spans)
+                # take first span
+                if first_answer_only:
+                    include_span_num = 1
+                else:
+                    include_span_num = len(spans)
+
+                start_positions = []
+                end_positions = []
+                for i in range(min(include_span_num, len(spans))):
+                    char_start, char_end, answer_text = spans[i][0], spans[i][1], spans[i][2]
+                    orig_answer_text = paragraph_text[char_start:char_end+1]
+                    #print("orig_answer_text", orig_answer_text)
+                    if orig_answer_text != answer_text:
+                        logger.info("Answer error: {}, Original {}".format(
+                            answer_text, orig_answer_text))
+                        print(paragraph_text[char_start:])
+                        continue
+                    
+                    start_position, end_position = char_to_word_offset[char_start], char_to_word_offset[char_end]
+                    #print("start_position", "end_position", start_position, end_position)
+                    #print("doc_tokens", doc_tokens)
+                    start_positions.append(start_position)
+                    end_positions.append(end_position)
+
+                if len(spans) == 0:
+                    start_positions.append(0)
+                    end_positions.append(0)
+
+                if first_answer_only:
+                    start_positions = start_positions[0]
+                    end_positions = end_positions[0]
+
+                example = MRQAExample(
+                    qas_id=qas_id,
+                    question_text=question_text, #question
+                    #paragraph_text=paragraph_text, # context text
+                    doc_tokens=doc_tokens, #passage text
+                    orig_answer_text=orig_answer_text, # answer text
+                    start_positions=start_positions, #answer start
+                    end_positions=end_positions, #answer end
+                    is_impossible=is_impossible)
+                examples.append(example)
+
+
+    #logger.info('Num avg answers: {}'.format(num_answers / len(examples)))
+    return examples
+
+def main_finetuning(args):
+    device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
+    n_gpu = torch.cuda.device_count()
+    logger.info("device: {}, n_gpu: {}, 16-bits training: {}".format(
+        device, n_gpu, args.fp16))
+
+    from torch.utils.tensorboard import SummaryWriter
+    # default `log_dir` is "runs" - we'll be more specific here
+    writer = SummaryWriter(
+        os.path.join(args.output_dir, "fintuning_loss_lmb_%s/" % str(args.lmb) 
+        + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")))
+
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    if n_gpu > 0:
+        torch.cuda.manual_seed_all(args.seed)
+
+    if args.gradient_accumulation_steps < 1:
+        raise ValueError("Invalid gradient_accumulation_steps parameter: {}, should be >= 1".format(
+                            args.gradient_accumulation_steps))
+    args.train_batch_size = \
+        args.train_batch_size // args.gradient_accumulation_steps
+
+    if not args.do_train and not args.do_eval:
+        raise ValueError("At least one of `do_train` or `do_eval` must be True.")
+
+    if args.do_train:
+        assert (args.train_file is not None) and (args.dev_file is not None)
+
+    if args.eval_test:
+        assert args.test_file is not None
+    else:
+        assert args.dev_file is not None
+
+    if not os.path.exists(args.output_dir):
+        os.makedirs(args.output_dir)
+    if args.do_train:
+        logger.addHandler(logging.FileHandler(os.path.join(args.output_dir, "train.log"), 'w'))
+    else:
+        logger.addHandler(logging.FileHandler(os.path.join(args.output_dir, "eval.log"), 'w'))
+    logger.info(args)
+
+    tokenizer = BertTokenizer.from_pretrained(
+        args.tokenizer, do_lower_case=args.do_lower_case)
+
+    if args.do_eval and (args.do_train or (not args.eval_test)):
+        with gzip.GzipFile(args.dev_file, 'r') as reader:
+            content = reader.read().decode('utf-8').strip().split('\n')[1:]
+            eval_dataset = [json.loads(line) for line in content]
+        '''
+        eval_examples = read_mrqa_examples(
+            input_file=args.dev_file, is_training=False)
+        eval_features = convert_examples_to_features(
+            examples=eval_examples,
+            tokenizer=tokenizer,
+            max_seq_length=args.max_seq_length,
+            doc_stride=args.doc_stride,
+            max_query_length=args.max_query_length,
+            is_training=False)
+        '''
+        eval_examples = read_crmc_examples(
+                args.dev_file, is_training=True, 
+                first_answer_only=True, 
+                do_lower_case=True,
+                remove_query_in_passage=False)
+        eval_features = convert_chinese_examples_to_features(
+                    examples=eval_examples,
+                    tokenizer=tokenizer,
+                    max_seq_length=args.max_seq_length,
+                    doc_stride=args.doc_stride,
+                    max_query_length=args.max_query_length,
+                    is_training=True,
+                    first_answer_only=True)
+        logger.info("***** Dev *****")
+        logger.info("  Num orig examples = %d", len(eval_examples))
+        logger.info("  Num split examples = %d", len(eval_features))
+        logger.info("  Batch size = %d", args.eval_batch_size)
+        all_input_ids = torch.tensor([f.input_ids for f in eval_features], dtype=torch.long)
+        all_input_mask = torch.tensor([f.input_mask for f in eval_features], dtype=torch.long)
+        all_segment_ids = torch.tensor([f.segment_ids for f in eval_features], dtype=torch.long)
+        all_example_index = torch.arange(all_input_ids.size(0), dtype=torch.long)
+        eval_data = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_example_index)
+        eval_dataloader = DataLoader(eval_data, batch_size=args.eval_batch_size)
+
+    if args.do_train:
+        train_examples = read_crmc_examples(
+                args.train_file, is_training=True, 
+                first_answer_only=True, 
+                do_lower_case=True,
+                remove_query_in_passage=False)
+        train_features = convert_chinese_examples_to_features(
+                examples=train_examples,
+                tokenizer=tokenizer,
+                max_seq_length=args.max_seq_length,
+                doc_stride=args.doc_stride,
+                max_query_length=args.max_query_length,
+                is_training=True,
+                first_answer_only=True)
+
+        if args.train_mode == 'sorted' or args.train_mode == 'random_sorted':
+            train_features = sorted(train_features, key=lambda f: np.sum(f.input_mask))
+        else:
+            random.shuffle(train_features)
+
+        all_input_ids = torch.tensor([f.input_ids for f in train_features], dtype=torch.long)
+        all_input_mask = torch.tensor([f.input_mask for f in train_features], dtype=torch.long)
+        all_segment_ids = torch.tensor([f.segment_ids for f in train_features], dtype=torch.long)
+        all_start_positions = torch.tensor([f.start_position for f in train_features], dtype=torch.long)
+        all_end_positions = torch.tensor([f.end_position for f in train_features], dtype=torch.long)
+        train_data = TensorDataset(all_input_ids, all_input_mask, all_segment_ids,
+                                   all_start_positions, all_end_positions)
+        train_dataloader = DataLoader(train_data, batch_size=args.train_batch_size)
+        train_batches = [batch for batch in train_dataloader]
+
+        num_train_optimization_steps = \
+            len(train_dataloader) // args.gradient_accumulation_steps * args.num_train_epochs
+        logger.info("***** Train *****")
+        logger.info("  Num orig examples = %d", len(train_examples))
+        logger.info("  Num split examples = %d", len(train_dataloader))
+        logger.info("  Batch size = %d", args.train_batch_size)
+        logger.info("  Num steps = %d", num_train_optimization_steps)
+
+        eval_step = max(1, len(train_batches) // args.eval_per_epoch)
+        best_result = None
+        lrs = [args.learning_rate] if args.learning_rate else [1e-6, 2e-6, 3e-6, 5e-6, 1e-5, 2e-5, 3e-5, 5e-5]
+        for lr in lrs:
+            model, pretrained_weights = BLANC.from_pretrained(
+                args.model, cache_dir=PYTORCH_PRETRAINED_BERT_CACHE)
+            if args.fp16:
+                model.half()
+            model.to(device)
+            if n_gpu > 1:
+                model = torch.nn.DataParallel(model)
+            param_optimizer = list(model.named_parameters())
+            param_optimizer = [n for n in param_optimizer if 'pooler' not in n[0]]
+            no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
+            optimizer_grouped_parameters = [
+                {'params': [p for n, p in param_optimizer
+                            if not any(nd in n for nd in no_decay)], 'weight_decay': 0.01},
+                {'params': [p for n, p in param_optimizer
+                            if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
+            ]
+
+            if args.fp16:
+                try:
+                    from apex.optimizers import FP16_Optimizer
+                    from apex.optimizers import FusedAdam
+                except ImportError:
+                    raise ImportError("Please install apex from https://www.github.com/nvidia/apex"
+                                      "to use distributed and fp16 training.")
+                optimizer = FusedAdam(optimizer_grouped_parameters,
+                                      lr=lr,
+                                      bias_correction=False,
+                                      max_grad_norm=1.0)
+                if args.loss_scale == 0:
+                    optimizer = FP16_Optimizer(optimizer, dynamic_loss_scale=True)
+                else:
+                    optimizer = FP16_Optimizer(optimizer, static_loss_scale=args.loss_scale)
+            else:
+                optimizer = BertAdam(optimizer_grouped_parameters,
+                                     lr=lr,
+                                     warmup=args.warmup_proportion,
+                                     t_total=num_train_optimization_steps)
+            global_step = 0
+            start_time = time.time()
+            from tqdm import tqdm
+            for epoch in range(int(args.num_train_epochs)):
+                model.train()
+                logger.info("Start epoch #{} (lr = {})...".format(epoch, lr))
+                running_loss = 0.0
+                for step, batch in tqdm(enumerate(train_batches)):
+                    if n_gpu == 1:
+                        batch = tuple(t.to(device) for t in batch)
+
+                    input_ids, input_mask, segment_ids, start_positions, end_positions = batch
+                    loss, _, _ = model(input_ids, segment_ids, input_mask, start_positions, end_positions, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+                    #print("step", step,"loss", loss)
+
+                    if n_gpu > 1:
+                        loss = loss.mean()
+                    if args.gradient_accumulation_steps > 1:
+                        loss = loss / args.gradient_accumulation_steps
+                        
+                    if args.fp16:
+                        optimizer.backward(loss)
+                    else:
+                        loss.backward()
+                    
+                    if (step + 1) % args.gradient_accumulation_steps == 0:
+                        if args.fp16:
+                            lr_this_step = lr * \
+                                warmup_linear(global_step/num_train_optimization_steps, args.warmup_proportion)
+                            for param_group in optimizer.param_groups:
+                                param_group['lr'] = lr_this_step
+                        optimizer.step()
+                        optimizer.zero_grad()
+                        global_step += 1
+
+                    running_loss += loss.item()
+                    if (step + 1) % 500 == 0:
+                       writer.add_scalar('Training loss of finetuning with lmb %s' % str(args.lmb),
+                            running_loss / 500,
+                            epoch * len(train_batches) + step + 1)
+                       running_loss = 0.0
+
+                    if (step + 1) % eval_step == 0:
+                        logger.info('Epoch: {}, Step: {} / {}, used_time = {:.2f}s'.format(
+                            epoch, step + 1, len(train_batches), time.time() - start_time))
+
+                        save_model = False
+                        if args.do_eval:
+                            result, _, _ = \
+                                evaluate(args, model, device, eval_dataset,
+                                         eval_dataloader, eval_examples, eval_features)
+                            model.train()
+                            for res_k, res_v in result.items():
+                                writer.add_scalar(
+                                    '%s in finetuning with lmb %s in dev set' % (res_k, str(args.lmb)),
+                                    res_v,
+                                    epoch * len(train_batches) + step + 1)
+
+                            result['global_step'] = global_step
+                            result['epoch'] = epoch
+                            result['learning_rate'] = lr
+                            result['batch_size'] = args.train_batch_size
+
+                            if (best_result is None) or (result[args.eval_metric] > best_result[args.eval_metric]):
+                                best_result = result
+                                save_model = True
+                                logger.info("!!! Best dev %s (lr=%s, epoch=%d): %.2f" %
+                                            (args.eval_metric, str(lr), epoch, result[args.eval_metric]))
+                        else:
+                            save_model = True
+                        if save_model:
+                            model_to_save = model.module if hasattr(model, 'module') else model
+                            output_model_file = os.path.join(args.output_dir, WEIGHTS_NAME)
+                            output_config_file = os.path.join(args.output_dir, CONFIG_NAME)
+                            torch.save(model_to_save.state_dict(), output_model_file)
+                            model_to_save.config.to_json_file(output_config_file)
+                            tokenizer.save_vocabulary(args.output_dir)
+                            if best_result:
+                                with open(os.path.join(args.output_dir, EVAL_FILE), "w") as writer:
+                                    for key in sorted(best_result.keys()):
+                                        writer.write("%s = %s\n" % (key, str(best_result[key])))
+
+    if args.do_eval:
+        if args.eval_test:
+            with gzip.GzipFile(args.test_file, 'r') as reader:
+                content = reader.read().decode('utf-8').strip().split('\n')[1:]
+                eval_dataset = [json.loads(line) for line in content]
+            eval_examples = read_mrqa_examples(
+                input_file=args.test_file, is_training=False)
+            eval_features = convert_examples_to_features(
+                examples=eval_examples,
+                tokenizer=tokenizer,
+                max_seq_length=args.max_seq_length,
+                doc_stride=args.doc_stride,
+                max_query_length=args.max_query_length,
+                is_training=False)
+            logger.info("***** Test *****")
+            logger.info("  Num orig examples = %d", len(eval_examples))
+            logger.info("  Num split examples = %d", len(eval_features))
+            logger.info("  Batch size = %d", args.eval_batch_size)
+            all_input_ids = torch.tensor([f.input_ids for f in eval_features], dtype=torch.long)
+            all_input_mask = torch.tensor([f.input_mask for f in eval_features], dtype=torch.long)
+            all_segment_ids = torch.tensor([f.segment_ids for f in eval_features], dtype=torch.long)
+            all_example_index = torch.arange(all_input_ids.size(0), dtype=torch.long)
+            eval_data = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_example_index)
+            eval_dataloader = DataLoader(eval_data, batch_size=args.eval_batch_size)
+        model, pretrained_weights = BLANC.from_pretrained(args.output_dir)
+        if args.fp16:
+            model.half()
+        model.to(device)
+        result, preds, nbest_preds = \
+            evaluate(args, model, device, eval_dataset,
+                     eval_dataloader, eval_examples, eval_features)
+        with open(os.path.join(args.output_dir, PRED_FILE), "w") as writer:
+            writer.write(json.dumps(preds, indent=4) + "\n")
+        with open(os.path.join(args.output_dir, TEST_FILE), "w") as writer:
+            for key in sorted(result.keys()):
+                writer.write("%s = %s\n" % (key, str(result[key])))
+
+
 if __name__ == "__main__":
         parser = argparse.ArgumentParser()
         parser.add_argument("--model", default="bert-base-chinese", type=str, required=True)
@@ -1664,7 +2102,7 @@ if __name__ == "__main__":
                             help="The maximum number of tokens for the question. Questions longer than this will "
                                  "be truncated to this length.")
         parser.add_argument("--do_train", action='store_true', help="Whether to run training.")
-        parser.add_argument("--train_mode", type=str, default='random_sorted', choices=['random', 'sorted', 'random_sorted'])
+        parser.add_argument("--train_mode", type=str, default='random', choices=['random', 'sorted', 'random_sorted'])
         parser.add_argument("--do_eval", action='store_true', help="Whether to run eval on the dev set.")
         #parser.add_argument("--do_lower_case", action='store_true', help="Set this flag if you are using an uncased model.")
         parser.add_argument("--eval_test", action="store_true", help="Whether to evaluate on final test set.")
@@ -1708,6 +2146,7 @@ if __name__ == "__main__":
         parser.add_argument('--co_training_mode', type=str, default='data_cur')
         parser.add_argument('--enqueue_thread_num', type=int, default=4)
         parser.add_argument('--is_co_training', type=bool, default=False)
+        parser.add_argument('--is_finetuning', type=bool, default=False)
         parser.add_argument('--debug', type=bool, default=False)
         parser.add_argument('--theta', type=float, default=0.8)
         parser.add_argument('--moving_loss_warmup_ratio', type=float, default=0.3)
@@ -1718,7 +2157,8 @@ if __name__ == "__main__":
         print('------is_co_training-----', args.is_co_training)
 
         if args.is_co_training:
+            logger.info('enter cotraining...')
             main_cotraining(args)
         else:
-            print('enter main....')
+            logger.info('enter main....')
             main(args)
