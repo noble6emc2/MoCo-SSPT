@@ -24,3 +24,4 @@ PYTHONIOENCODING=utf-8 CUDA_VISIBLE_DEVICES=0,1 python3 src/lm/BLANC/run_mrqa_bl
   --enqueue_thread_num 2 \
   --num_iteration 37500 \
   --moving_loss_num 200 \
+  --debug true

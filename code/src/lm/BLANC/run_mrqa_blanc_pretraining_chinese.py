@@ -102,6 +102,8 @@ class MRQAExample(object):
                  orig_answer_text=None,
                  start_positions=None,
                  end_positions=None,
+                 start_position=None,
+                 end_position=None,
                  is_impossible=None):
         self.qas_id = qas_id
         self.question_text = question_text
@@ -110,6 +112,8 @@ class MRQAExample(object):
         self.orig_answer_text = orig_answer_text
         self.start_positions = start_positions
         self.end_positions = end_positions
+        self.start_position = start_position
+        self.end_position = end_position
         self.is_impossible = is_impossible
 
     def __str__(self):
@@ -1649,7 +1653,7 @@ def read_crmc_examples(input_file, is_training,
     first_answer_only, do_lower_case,
     remove_query_in_passage):
     """Read crmc json file for pretraining into a list of MRQAExample."""
-    with open(input_file, 'r') as fin:
+    with open(input_file, 'r', encoding='utf-8') as fin:
         # skip header
         input_js = json.load(fin)
         input_data = input_js["data"]
@@ -1802,6 +1806,8 @@ def read_crmc_examples(input_file, is_training,
                     orig_answer_text=orig_answer_text, # answer text
                     start_positions=start_positions, #answer start
                     end_positions=end_positions, #answer end
+                    start_position=start_positions,
+                    end_position=end_positions,
                     is_impossible=is_impossible)
                 examples.append(example)
 
@@ -1817,10 +1823,11 @@ def main_finetuning(args):
 
     from torch.utils.tensorboard import SummaryWriter
     # default `log_dir` is "runs" - we'll be more specific here
-    writer = SummaryWriter(
+    tb_writer = SummaryWriter(
         os.path.join(args.output_dir, "fintuning_loss_lmb_%s/" % str(args.lmb) 
         + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")))
 
+    #writer.add_scalar('Training loss of finetuning with lmb test',0,1)
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -1980,7 +1987,7 @@ def main_finetuning(args):
                 model.train()
                 logger.info("Start epoch #{} (lr = {})...".format(epoch, lr))
                 running_loss = 0.0
-                for step, batch in tqdm(enumerate(train_batches)):
+                for step, batch in tqdm(enumerate(train_batches), total = len(train_batches)):
                     if n_gpu == 1:
                         batch = tuple(t.to(device) for t in batch)
 
@@ -2010,12 +2017,12 @@ def main_finetuning(args):
 
                     running_loss += loss.item()
                     if (step + 1) % 500 == 0:
-                       writer.add_scalar('Training loss of finetuning with lmb %s' % str(args.lmb),
+                       tb_writer.add_scalar('Training loss of finetuning with lmb %s' % str(args.lmb),
                             running_loss / 500,
                             epoch * len(train_batches) + step + 1)
                        running_loss = 0.0
 
-                    if (step + 1) % eval_step == 0:
+                    if (step + 1) % eval_step == 0 or args.debug:
                         logger.info('Epoch: {}, Step: {} / {}, used_time = {:.2f}s'.format(
                             epoch, step + 1, len(train_batches), time.time() - start_time))
 
@@ -2026,7 +2033,7 @@ def main_finetuning(args):
                                          eval_dataloader, eval_examples, eval_features)
                             model.train()
                             for res_k, res_v in result.items():
-                                writer.add_scalar(
+                                tb_writer.add_scalar(
                                     '%s in finetuning with lmb %s in dev set' % (res_k, str(args.lmb)),
                                     res_v,
                                     epoch * len(train_batches) + step + 1)
@@ -2035,6 +2042,7 @@ def main_finetuning(args):
                             result['epoch'] = epoch
                             result['learning_rate'] = lr
                             result['batch_size'] = args.train_batch_size
+                            print(result)
 
                             if (best_result is None) or (result[args.eval_metric] > best_result[args.eval_metric]):
                                 best_result = result
