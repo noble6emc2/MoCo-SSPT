@@ -57,7 +57,7 @@ if __name__ == "__main__":
     parser.add_argument('--model', type=str, default="bert-base-chinese")
     args = parser.parse_args()
 
-    examples = p_cn.read_crmc_examples(
+    examples, datasets = p_cn.read_crmc_examples(
                 "/Users/noble6emc2/Downloads/cmrc2018_dev.json", is_training=True, 
                 first_answer_only=True, 
                 do_lower_case=True,
@@ -65,7 +65,11 @@ if __name__ == "__main__":
 
     tokenizer = BertTokenizer.from_pretrained(
             "bert-base-chinese")
-    print(len(examples))
+    '''print(len(examples))
+    for e, d in zip(examples, datasets):
+        print(e)
+        print(d)
+        input("---------")'''
     train_features = p_cn.convert_chinese_examples_to_features(
                 examples=examples,
                 tokenizer=tokenizer,
@@ -74,7 +78,6 @@ if __name__ == "__main__":
                 max_query_length=64,
                 is_training=True,
                 first_answer_only=True)
-
     print(len(train_features))
     for i in train_features:
         print(i)

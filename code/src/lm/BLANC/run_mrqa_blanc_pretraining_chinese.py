@@ -146,7 +146,9 @@ class InputFeatures(object):
                  input_mask,
                  segment_ids,
                  start_positions=None,
-                 end_positions=None):
+                 end_positions=None,
+                 start_position=None,
+                 end_position=None):
         self.unique_id = unique_id
         self.example_index = example_index
         self.doc_span_index = doc_span_index
@@ -158,6 +160,8 @@ class InputFeatures(object):
         self.segment_ids = segment_ids
         self.start_positions = start_positions
         self.end_positions = end_positions
+        self.start_position = start_position
+        self.end_position = end_position
 
     def __str__(self):
         return self.__repr__()
@@ -491,8 +495,8 @@ def convert_chinese_examples_to_features(examples, tokenizer, max_seq_length,
 
             features.append(
                 InputFeatures(
-                    unique_id=str(example.qas_id)+"_"+str(doc_span_index),
-                    example_index=example.qas_id,
+                    unique_id=unique_id,
+                    example_index=example_index,
                     doc_span_index=doc_span_index,
                     tokens=tokens, # Query + Passage Span
                     token_to_orig_map=token_to_orig_map,
@@ -501,7 +505,9 @@ def convert_chinese_examples_to_features(examples, tokenizer, max_seq_length,
                     input_mask=input_mask, # Vocab id list
                     segment_ids=segment_ids,
                     start_positions=start_positions, # Answer start pos(Query included)
-                    end_positions=end_positions,))
+                    end_positions=end_positions,
+                    start_position=start_positions,
+                    end_position=end_positions,))
             unique_id += 1
 
     return features
@@ -767,9 +773,10 @@ def _compute_softmax(scores):
 
 def get_raw_scores(dataset, predictions, examples):
     answers = {}
-    for example in dataset:
-        for qa in example['qas']:
-            answers[qa['qid']] = qa['answers']
+    for qa in dataset:
+        #for qa in example['qas']:
+        answers[qa['qid']] = qa['answers']
+
     exact_scores = {}
     f1_scores = {}
     scores = {}
@@ -1659,6 +1666,7 @@ def read_crmc_examples(input_file, is_training,
 
     examples = []
     num_answers = 0
+    datasets = []
     for i, article in enumerate(input_data):
         for entry in article["paragraphs"]:
             paragraph_text = entry["context"].strip()
@@ -1692,7 +1700,7 @@ def read_crmc_examples(input_file, is_training,
                 continue
 
             for qa in entry["qas"]:
-                qas_id = article["id"] + "_" + entry["id"] + "_" + qa["id"]
+                qas_id = qa["id"]
                 '''if qa["question"].find('UNK') == -1:
                     logger.info(f"WARNING: Cannot Find UNK in Question %s" % qas_id)
                     continue'''
@@ -1728,7 +1736,9 @@ def read_crmc_examples(input_file, is_training,
                     for ans in answers]
                 '''
                 ans_list = []
+                answer_text_list = []
                 for ans in answers:
+                    answer_text_list.append(ans['text'])
                     if ans['answer_start'] == -1:
                         continue
 
@@ -1782,6 +1792,8 @@ def read_crmc_examples(input_file, is_training,
                     start_positions = start_positions[0]
                     end_positions = end_positions[0]
 
+                datasets.append({'qid': qas_id, 'answers': answer_text_list})
+
                 example = MRQAExample(
                     qas_id=qas_id,
                     question_text=question_text, #question
@@ -1795,7 +1807,7 @@ def read_crmc_examples(input_file, is_training,
 
 
     #logger.info('Num avg answers: {}'.format(num_answers / len(examples)))
-    return examples
+    return examples, datasets
 
 def main_finetuning(args):
     device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
@@ -1844,9 +1856,9 @@ def main_finetuning(args):
         args.tokenizer, do_lower_case=args.do_lower_case)
 
     if args.do_eval and (args.do_train or (not args.eval_test)):
-        with gzip.GzipFile(args.dev_file, 'r') as reader:
-            content = reader.read().decode('utf-8').strip().split('\n')[1:]
-            eval_dataset = [json.loads(line) for line in content]
+        #with gzip.GzipFile(args.dev_file, 'r') as reader:
+        #    content = reader.read().decode('utf-8').strip().split('\n')[1:]
+        #    eval_dataset = [json.loads(line) for line in content]
         '''
         eval_examples = read_mrqa_examples(
             input_file=args.dev_file, is_training=False)
@@ -1858,7 +1870,7 @@ def main_finetuning(args):
             max_query_length=args.max_query_length,
             is_training=False)
         '''
-        eval_examples = read_crmc_examples(
+        eval_examples, eval_dataset = read_crmc_examples(
                 args.dev_file, is_training=True, 
                 first_answer_only=True, 
                 do_lower_case=True,
@@ -1883,7 +1895,7 @@ def main_finetuning(args):
         eval_dataloader = DataLoader(eval_data, batch_size=args.eval_batch_size)
 
     if args.do_train:
-        train_examples = read_crmc_examples(
+        train_examples, _ = read_crmc_examples(
                 args.train_file, is_training=True, 
                 first_answer_only=True, 
                 do_lower_case=True,
