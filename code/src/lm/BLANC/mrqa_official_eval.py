@@ -46,6 +46,29 @@ def cached_path(url_or_filename, cache_dir = None):
         # Something unknown
         raise ValueError("unable to parse {} as a URL or as a local path".format(url_or_filename))
 
+def normalize_cn_answer(s):
+    """Lower text and remove punctuation, articles and extra whitespace."""
+
+    def remove_articles(text):
+        return re.sub(r'\b(a|an|the)\b', ' ', text)
+
+    def white_space_fix(text):
+        return ' '.join(text.split())
+
+    def remove_punc(text):
+        exclude = set(string.punctuation)
+        exclude = exclude.union(set(r"""，。：；、？！“”‘’【】—"""))
+        return ' '.join(ch for ch in text if ch not in exclude)
+
+    def lower(text):
+        return text.lower()
+
+    return white_space_fix(remove_articles(remove_punc(lower(s))))
+
+def normalize_answer(s):
+    return normalize_cn_answer(s)
+
+'''
 def normalize_answer(s):
     """Lower text and remove punctuation, articles and extra whitespace."""
     def remove_articles(text):
@@ -62,6 +85,7 @@ def normalize_answer(s):
         return text.lower()
 
     return white_space_fix(remove_articles(remove_punc(lower(s))))
+'''
 
 
 def f1_score(prediction, ground_truth):

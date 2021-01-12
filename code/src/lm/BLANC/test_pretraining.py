@@ -1,8 +1,10 @@
 import run_mrqa_blanc_pretraining_chinese as p_cn
 from pytorch_pretrained_bert.tokenization import BasicTokenizer, BertTokenizer
 import pretrain_dataloader_chinese as cn_dataloader
+import mrqa_official_eval as m_eval
 import argparse
 import unicodedata
+from collections import Counter
 if __name__ == "__main__":
     '''
 
@@ -35,7 +37,12 @@ if __name__ == "__main__":
             print(train_features[0])
             break
     '''
-    
+    print(m_eval.f1_score("normalize_answer", "lize_answer"))
+    print(m_eval.normalize_answer("oh adasa shoot").split())
+    print(Counter("normalize_answer"))
+    print(Counter("lize_answer"))
+    print(Counter("normalize_answer") & Counter("lize_answer"))
+    input()
     parser = argparse.ArgumentParser()
     parser.add_argument("--max_seq_length", default=384, type=int,
                             help="The maximum total input sequence length after WordPiece tokenization. Sequences "
@@ -62,14 +69,15 @@ if __name__ == "__main__":
                 first_answer_only=True, 
                 do_lower_case=True,
                 remove_query_in_passage=False)
+    print(len(examples))
 
     tokenizer = BertTokenizer.from_pretrained(
             "bert-base-chinese")
-    '''print(len(examples))
+    print(len(examples))
     for e, d in zip(examples, datasets):
         print(e)
         print(d)
-        input("---------")'''
+        input("---------")
     train_features = p_cn.convert_chinese_examples_to_features(
                 examples=examples,
                 tokenizer=tokenizer,
