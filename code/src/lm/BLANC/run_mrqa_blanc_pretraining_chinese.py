@@ -2154,11 +2154,15 @@ if __name__ == "__main__":
         args = parser.parse_args()
         args.output_dir_a = args.output_dir + "_a"
         args.output_dir_b = args.output_dir + "_b"
+
         print('------is_co_training-----', args.is_co_training)
 
         if args.is_co_training:
-            logger.info('enter cotraining...')
+            logger.info('enter cotraining....')
             main_cotraining(args)
+        elif args.is_finetuning:
+            logger.info('enter finetuning....')
+            main_finetuning(args)
         else:
             logger.info('enter main....')
             main(args)
