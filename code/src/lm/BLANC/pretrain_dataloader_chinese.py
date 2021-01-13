@@ -225,79 +225,59 @@ global_q = None
 
 def get_training_batch_chinese(args, co_training: bool, p_list: list):
     total_bytes = os.path.getsize(args.train_file)
-    if not co_training:
-        global global_q
-        q = multi_process_get_training_data_queue(args, 0, total_bytes, p_list)
-        global_q = q
-        feature_buffer = []
-        batch_indicator = 0
-        while True:
-            new_feature = q.get()
-            feature_buffer.append(new_feature)
-            #print('after q.get')
-            #sys.stdout.flush()
-            batch_indicator += 1
-            if batch_indicator == args.train_batch_size:  # ignore the reminders
-                batch_input_ids = torch.tensor([f.input_ids for f in feature_buffer], dtype=torch.long)
-                batch_input_mask = torch.tensor([f.input_mask for f in feature_buffer], dtype=torch.long)
-                batch_segment_ids = torch.tensor([f.segment_ids for f in feature_buffer], dtype=torch.long)
-                batch_start_positions = torch.tensor([f.start_positions for f in feature_buffer], dtype=torch.long)
-                batch_end_positions = torch.tensor([f.end_positions for f in feature_buffer], dtype=torch.long)
-                #for feature in feature_buffer:
-                #    print(feature)
-                #print(len(feature_buffer))
-                yield batch_input_ids, batch_input_mask, batch_segment_ids, batch_start_positions, batch_end_positions
-                
-                batch_indicator = 0
-                feature_buffer = []
-    else:
-        global global_q_a
-        global global_q_b
-        split_byte = np.random.rand() * total_bytes
-        q_a = multi_process_get_training_data_queue(args, 
-            split_byte, (split_byte + total_bytes // 2) % total_bytes, p_list)
-        q_b = multi_process_get_training_data_queue(args, 
-            (split_byte + total_bytes // 2) % total_bytes, split_byte, p_list)
-        global_q_a = q_a
-        global_q_b = q_b
-        feature_buffer = []
-        batch_indicator = 0
-        while True:
-            new_feature_a = q_a.get()
-            new_feature_b = q_b.get()
-            feature_buffer.append((new_feature_a,
-                new_feature_b))
-            #print('after q.get')
-            #sys.stdout.flush()
-            batch_indicator += 1
-            if batch_indicator == args.train_batch_size:  # ignore the reminders
-                batch_input_ids = torch.tensor([f.input_ids for f, _ in feature_buffer], dtype=torch.long)
-                batch_input_mask = torch.tensor([f.input_mask for f, _ in feature_buffer], dtype=torch.long)
-                batch_segment_ids = torch.tensor([f.segment_ids for f, _ in feature_buffer], dtype=torch.long)
-                batch_start_positions = torch.tensor([f.start_positions for f, _ in feature_buffer], dtype=torch.long)
-                batch_end_positions = torch.tensor([f.end_positions for f, _ in feature_buffer], dtype=torch.long)
-                #print("------------co-training--------------")
-                #for feature, _ in feature_buffer:
-                #    print(feature)
-                #    break
+    global global_q_a
+    global global_q_b
+    split_byte = np.random.rand() * total_bytes
+    q_a = multi_process_get_training_data_queue(args, 
+        split_byte, (split_byte + total_bytes // 2) % total_bytes, p_list)
+    q_b = multi_process_get_training_data_queue(args, 
+        (split_byte + total_bytes // 2) % total_bytes, split_byte, p_list)
+    global_q_a = q_a
+    global_q_b = q_b
+    feature_buffer = []
+    batch_indicator = 0
+    while True:
+        new_feature_a = q_a.get()
+        new_feature_b = q_b.get()
+        feature_buffer.append((new_feature_a,
+            new_feature_b))
+        #print('after q.get')
+        #sys.stdout.flush()
+        batch_indicator += 1
+        if batch_indicator == args.train_batch_size:  # ignore the reminders
+            batch_input_ids = torch.tensor([f.input_ids for f, _ in feature_buffer], dtype=torch.long)
+            batch_input_mask = torch.tensor([f.input_mask for f, _ in feature_buffer], dtype=torch.long)
+            batch_segment_ids = torch.tensor([f.segment_ids for f, _ in feature_buffer], dtype=torch.long)
+            batch_start_positions = torch.tensor([f.start_positions for f, _ in feature_buffer], dtype=torch.long)
+            batch_end_positions = torch.tensor([f.end_positions for f, _ in feature_buffer], dtype=torch.long)
+            #print("------------co-training--------------")
+            #for feature, _ in feature_buffer:
+            #    print(feature)
+            #    break
 
-                #print(len(feature_buffer))
-                batch_a = batch_input_ids, batch_input_mask, batch_segment_ids, batch_start_positions, batch_end_positions
+            #print(len(feature_buffer))
+            batch_a = batch_input_ids, batch_input_mask, batch_segment_ids, batch_start_positions, batch_end_positions
 
-                batch_input_ids = torch.tensor([f.input_ids for _, f in feature_buffer], dtype=torch.long)
-                batch_input_mask = torch.tensor([f.input_mask for _, f in feature_buffer], dtype=torch.long)
-                batch_segment_ids = torch.tensor([f.segment_ids for _, f in feature_buffer], dtype=torch.long)
-                batch_start_positions = torch.tensor([f.start_positions for _, f in feature_buffer], dtype=torch.long)
-                batch_end_positions = torch.tensor([f.end_positions for _, f in feature_buffer], dtype=torch.long)
-                #print("-------------co-training-------------")
-                #for _, feature in feature_buffer:
-                #    print(feature)
-                #    break
+            batch_input_ids = torch.tensor([f.input_ids for _, f in feature_buffer], dtype=torch.long)
+            batch_input_mask = torch.tensor([f.input_mask for _, f in feature_buffer], dtype=torch.long)
+            batch_segment_ids = torch.tensor([f.segment_ids for _, f in feature_buffer], dtype=torch.long)
+            batch_start_positions = torch.tensor([f.start_positions for _, f in feature_buffer], dtype=torch.long)
+            batch_end_positions = torch.tensor([f.end_positions for _, f in feature_buffer], dtype=torch.long)
+            #print("-------------co-training-------------")
+            #for _, feature in feature_buffer:
+            #    print(feature)
+            #    break
 
-                #print(len(feature_buffer))
-                batch_b = batch_input_ids, batch_input_mask, batch_segment_ids, batch_start_positions, batch_end_positions
+            #print(len(feature_buffer))
+            batch_b = batch_input_ids, batch_input_mask, batch_segment_ids, batch_start_positions, batch_end_positions
 
+            if co_training:
                 yield batch_a, batch_b
-                
-                batch_indicator = 0
-                feature_buffer = []
+            else:
+                yield batch_a
+                yield batch_b
+            
+            batch_indicator = 0
+            feature_buffer = []
+
+        
