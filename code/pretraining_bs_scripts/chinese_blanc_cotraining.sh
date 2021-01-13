@@ -20,8 +20,8 @@ PYTHONIOENCODING=utf-8 CUDA_VISIBLE_DEVICES=0,1 python3 src/lm/BLANC/run_mrqa_bl
   --lmb $LMB \
   --is_co_training true \
   --co_training_mode moving_loss\
-  --enqueue_thread_num 2 \
-  --num_iteration 37500 \
+  --enqueue_thread_num $ENQUEUETHREAD \
+  --num_iteration $NUMITER \
   --moving_loss_num 200 \
   --theta 0.8 \
   --moving_loss_warmup_ratio $WARMUP
