@@ -1,4 +1,4 @@
-CUDA_VISIBLE_DEVICES=3 python3 src/lm/BLANC/run_mrqa_blanc_pretraining_chinese.py \
+CUDA_VISIBLE_DEVICES=$CUDA python3 src/lm/BLANC/run_mrqa_blanc_pretraining_chinese.py \
   --do_train \
   --model /apdcephfs/common/mindahu/bert-base-chinese.tar.gz \
   --tokenizer /apdcephfs/common/mindahu/bert-base-chinese-vocab.txt \
@@ -6,7 +6,7 @@ CUDA_VISIBLE_DEVICES=3 python3 src/lm/BLANC/run_mrqa_blanc_pretraining_chinese.p
   --dev_file $DATA_DIR/dev.jsonl.gz \
   --test_file $DATA_DIR/test.jsonl.gz \
   --train_batch_size 8 \
-  --eval_batch_size 16  \
+  --eval_batch_size 16 \
   --learning_rate 2e-5 \
   --num_train_epochs 1 \
   --max_seq_length 384 \
@@ -18,5 +18,5 @@ CUDA_VISIBLE_DEVICES=3 python3 src/lm/BLANC/run_mrqa_blanc_pretraining_chinese.p
   --geometric_p $GEOP \
   --window_size $WINS \
   --lmb $LMB \
-  --enqueue_thread_num 2 \
-  --num_iteration 37500
+  --enqueue_thread_num $ENQUEUETHREAD \
+  --num_iteration $ITERNUM

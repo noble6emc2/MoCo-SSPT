@@ -1,8 +1,8 @@
-PYTHONIOENCODING=utf-8 CUDA_VISIBLE_DEVICES=$CUDA python3 src/lm/BLANC/run_mrqa_blanc_pretraining_chinese.py \
+PYTHONIOENCODING=utf-8 CUDA_VISIBLE_DEVICES=2 python3 src/lm/BLANC/run_mrqa_blanc_pretraining_chinese.py \
   --do_train \
   --do_eval \
-  --model /apdcephfs/common/mindahu/BLANC/code/checkpoints/pertraining_cn_cotraining/trial_002_cotraining_moving_loss_200_iter_3m_eque_1_warmup_0.1_lmb_0.2/0_b_iter_356249 \
-  --tokenizer /apdcephfs/common/mindahu/BLANC/code/checkpoints/pertraining_cn_cotraining/trial_002_cotraining_moving_loss_200_iter_3m_eque_1_warmup_0.1_lmb_0.2/0_b_iter_356249/vocab.txt \
+  --model /apdcephfs/common/mindahu/BLANC/code/checkpoints/pertraining_cn_cotraining_data_cur/trial_002_data_cur_iter_300k_warmup_0.3_theta_0.5_enqueue_1/0_a \
+  --tokenizer /apdcephfs/common/mindahu/BLANC/code/checkpoints/pertraining_cn_cotraining_data_cur/trial_002_data_cur_iter_300k_warmup_0.3_theta_0.5_enqueue_1/0_a/vocab.txt \
   --train_file $DATA_DIR/cmrc2018_train.json \
   --dev_file $DATA_DIR/cmrc2018_dev.json \
   --test_file $DATA_DIR/test.jsonl.gz \

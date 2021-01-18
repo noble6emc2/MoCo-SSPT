@@ -1578,24 +1578,32 @@ def main_cotraining(args):
 
                         if save_model:
                             model_to_save = model_a.module if hasattr(model_a, 'module') else model_a
-                            output_model_file = os.path.join(args.output_dir_a, WEIGHTS_NAME)
-                            output_config_file = os.path.join(args.output_dir_a, CONFIG_NAME)
+                            output_dir_a_iter = args.output_dir_a + '_iter_%d' % step
+                            output_dir_b_iter = args.output_dir_b + '_iter_%d' % step
+                            if not os.path.exists(output_dir_a_iter):
+                                os.makedirs(output_dir_a_iter)
+
+                            if not os.path.exists(output_dir_b_iter):
+                                os.makedirs(output_dir_b_iter)
+
+                            output_model_file = os.path.join(output_dir_a_iter, WEIGHTS_NAME)
+                            output_config_file = os.path.join(output_dir_a_iter, CONFIG_NAME)
                             torch.save(model_to_save.state_dict(), output_model_file)
                             model_to_save.config.to_json_file(output_config_file)
-                            tokenizer.save_vocabulary(args.output_dir_a)
+                            tokenizer.save_vocabulary(output_dir_a_iter)
                             if result_a:
-                                with open(os.path.join(args.output_dir_a, EVAL_FILE), "w") as writer:
+                                with open(os.path.join(output_dir_a_iter, EVAL_FILE), "w") as writer:
                                     for key in sorted(result_a.keys()):
                                         writer.write("%s = %s\n" % (key, str(result_a[key])))
 
                             model_to_save = model_b.module if hasattr(model_b, 'module') else model_b
-                            output_model_file = os.path.join(args.output_dir_b, WEIGHTS_NAME)
-                            output_config_file = os.path.join(args.output_dir_b, CONFIG_NAME)
+                            output_model_file = os.path.join(output_dir_b_iter, WEIGHTS_NAME)
+                            output_config_file = os.path.join(output_dir_b_iter, CONFIG_NAME)
                             torch.save(model_to_save.state_dict(), output_model_file)
                             model_to_save.config.to_json_file(output_config_file)
-                            tokenizer.save_vocabulary(args.output_dir_b)
+                            tokenizer.save_vocabulary(output_dir_b_iter)
                             if result_b:
-                                with open(os.path.join(args.output_dir_b, EVAL_FILE), "w") as writer:
+                                with open(os.path.join(output_dir_b_iter, EVAL_FILE), "w") as writer:
                                     for key in sorted(result_b.keys()):
                                         writer.write("%s = %s\n" % (key, str(result_b[key])))
 
