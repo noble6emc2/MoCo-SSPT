@@ -56,14 +56,20 @@ if __name__ == "__main__":
     parser.add_argument('--do_lower_case', type=bool, default=True)
     parser.add_argument('--remove_query_in_passage', type=bool, default=True)
     parser.add_argument('--enqueue_thread_num', type=int, default=1)
-    parser.add_argument('--batch_size', type=int, default=32)
+    parser.add_argument('--train_batch_size', type=int, default=8)
     parser.add_argument('--window_size', type=int, default=5)
+    parser.add_argument('--dataloader_offset', type=int, default=125000)
     parser.add_argument('--lmb', type=float, default=0.5)
     parser.add_argument('--train_file', type=str, 
         default="/Users/noble6emc2/Desktop/Tencent/BLANC/code/src/lm/BLANC/test_train.txt")
     parser.add_argument('--model', type=str, default="bert-base-chinese")
+    parser.add_argument('--tokenizer', type=str, default="bert-base-chinese")
     args = parser.parse_args()
-
+    for batch_a, batch_b in cn_dataloader.get_training_batch_chinese(args, co_training = True, p_list = []):
+        print(batch_a[0])
+        print(batch_b[0])
+        input('----')
+    
     examples, datasets = p_cn.read_crmc_examples(
                 "/Users/noble6emc2/Downloads/cmrc2018_dev.json", is_training=True, 
                 first_answer_only=True, 

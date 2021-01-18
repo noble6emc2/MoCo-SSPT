@@ -236,15 +236,26 @@ def get_training_batch_chinese(args, co_training: bool, p_list: list):
     global_q_b = q_b
     feature_buffer = []
     batch_indicator = 0
+    iter_count = 0
+    reach_offset = False
     while True:
         new_feature_a = q_a.get()
         new_feature_b = q_b.get()
-        feature_buffer.append((new_feature_a,
-            new_feature_b))
+
+        if reach_offset or iter_count + 1 > args.dataloader_offset:
+            feature_buffer.append((new_feature_a,
+                new_feature_b))
         #print('after q.get')
         #sys.stdout.flush()
         batch_indicator += 1
         if batch_indicator == args.train_batch_size:  # ignore the reminders
+            if not reach_offset and iter_count + 1 <= args.dataloader_offset:
+                iter_count += 1
+                batch_indicator = 0
+                print('-----jumping to offset:', iter_count, end='\r')
+                continue
+
+            reach_offset = True
             batch_input_ids = torch.tensor([f.input_ids for f, _ in feature_buffer], dtype=torch.long)
             batch_input_mask = torch.tensor([f.input_mask for f, _ in feature_buffer], dtype=torch.long)
             batch_segment_ids = torch.tensor([f.segment_ids for f, _ in feature_buffer], dtype=torch.long)
