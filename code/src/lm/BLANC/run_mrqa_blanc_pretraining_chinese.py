@@ -1335,21 +1335,8 @@ def main_cotraining(args):
         result_a = None
         result_b = None
         lrs = [args.learning_rate] if args.learning_rate else [1e-6, 2e-6, 3e-6, 5e-6, 1e-5, 2e-5, 3e-5, 5e-5]
-        for lr in lrs:
-            model_a, pretrained_weights_a = BLANC.from_pretrained(
-                args.model, cache_dir=PYTORCH_PRETRAINED_BERT_CACHE)
-            model_b, pretrained_weights_b = BLANC.from_pretrained(
-                args.model, cache_dir=PYTORCH_PRETRAINED_BERT_CACHE)
-            if args.fp16:
-                model_a.half()
-                model_b.half()
-
-            model_a.to(device)
-            model_b.to(device)
-            if n_gpu > 1:
-                model_a = torch.nn.DataParallel(model_a)
-                model_b = torch.nn.DataParallel(model_b)
-
+        
+        def create_optimizer(model_a, model_b, ):
             param_optimizer_a = list(model_a.named_parameters())
             param_optimizer_b = list(model_b.named_parameters())
             param_optimizer_a = [n for n in param_optimizer_a if 'pooler' not in n[0]]
@@ -1398,12 +1385,38 @@ def main_cotraining(args):
                                      lr=lr,
                                      warmup=args.warmup_proportion,
                                      t_total=num_train_optimization_steps)
+
+            return optimizer_a, optimizer_b
+
+        for lr in lrs:
+            model_a, pretrained_weights_a = BLANC.from_pretrained(
+                args.model, cache_dir=PYTORCH_PRETRAINED_BERT_CACHE)
+            model_b, pretrained_weights_b = BLANC.from_pretrained(
+                args.model, cache_dir=PYTORCH_PRETRAINED_BERT_CACHE)
+            if args.fp16:
+                model_a.half()
+                model_b.half()
+
+            model_a.to(device)
+            model_b.to(device)
+            if n_gpu > 1:
+                model_a = torch.nn.DataParallel(model_a)
+                model_b = torch.nn.DataParallel(model_b)
+
+            if args.new_cotraining_optimizer:
+                optimizer_a, optimizer_b = create_optimizer(model_a, 
+                    model_b, 
+                    int(num_train_optimization_steps * args.moving_loss_warmup_ratio))
+            else:
+                optimizer_a, optimizer_b = create_optimizer(model_a, 
+                    model_b, num_train_optimization_steps)
             global_step = 0
             start_time = time.time()
             lmb_window_list_a = []
             lmb_window_list_b = []
             from tqdm import tqdm
             p_list = []
+            first_in_cotraining = True
             for epoch in range(int(args.num_train_epochs)):
                 logger.info("Start epoch #{} (lr = {})...".format(epoch, lr))
                 running_loss_a = 0.0
@@ -1437,6 +1450,13 @@ def main_cotraining(args):
                         loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
                     else:
                         # co-training stage
+                        if args.new_cotraining_optimizer and first_in_cotraining:
+                            optimizer_a, optimizer_b = create_optimizer(model_a, 
+                                model_b,
+                                num_train_optimization_steps - global_step
+                                )
+                            first_in_cotraining = False
+                            
                         model_a.eval()
                         model_b.eval()
 
@@ -2179,6 +2199,7 @@ if __name__ == "__main__":
         parser.add_argument('--theta', type=float, default=0.8)
         parser.add_argument('--moving_loss_warmup_ratio', type=float, default=0.3)
         parser.add_argument('--moving_loss_num', type=int, default=8)
+        parser.add_argument('--new_cotraining_optimizer', type=bool, default=False)
         args = parser.parse_args()
         args.output_dir_a = args.output_dir + "_a"
         args.output_dir_b = args.output_dir + "_b"
