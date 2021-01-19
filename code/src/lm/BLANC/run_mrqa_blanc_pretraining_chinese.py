@@ -1410,6 +1410,7 @@ def main_cotraining(args):
             else:
                 optimizer_a, optimizer_b = create_optimizer(model_a, 
                     model_b, num_train_optimization_steps)
+
             global_step = 0
             start_time = time.time()
             lmb_window_list_a = []
@@ -2204,7 +2205,8 @@ if __name__ == "__main__":
         args.output_dir_a = args.output_dir + "_a"
         args.output_dir_b = args.output_dir + "_b"
 
-        print('------is_co_training-----', args.is_co_training)
+        logger.info('------is_co_training-----', args.is_co_training)
+        logger.info('------new_cotraining_optimizer-----', args.new_cotraining_optimizer)
 
         if args.is_co_training:
             logger.info('enter cotraining....')
