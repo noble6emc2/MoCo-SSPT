@@ -1336,7 +1336,7 @@ def main_cotraining(args):
         result_b = None
         lrs = [args.learning_rate] if args.learning_rate else [1e-6, 2e-6, 3e-6, 5e-6, 1e-5, 2e-5, 3e-5, 5e-5]
         
-        def create_optimizer(model_a, model_b, ):
+        def create_optimizer(model_a, model_b, num_train_optimization_steps):
             param_optimizer_a = list(model_a.named_parameters())
             param_optimizer_b = list(model_b.named_parameters())
             param_optimizer_a = [n for n in param_optimizer_a if 'pooler' not in n[0]]
