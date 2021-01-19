@@ -2205,8 +2205,8 @@ if __name__ == "__main__":
         args.output_dir_a = args.output_dir + "_a"
         args.output_dir_b = args.output_dir + "_b"
 
-        logger.info('------is_co_training-----', args.is_co_training)
-        logger.info('------new_cotraining_optimizer-----', args.new_cotraining_optimizer)
+        logger.info('------is_co_training-----: %s' % args.is_co_training)
+        logger.info('------new_cotraining_optimizer-----: %s' % args.new_cotraining_optimizer)
 
         if args.is_co_training:
             logger.info('enter cotraining....')
