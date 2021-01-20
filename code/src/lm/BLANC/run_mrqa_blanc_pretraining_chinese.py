@@ -1408,6 +1408,7 @@ def main_cotraining(args):
                 args.moving_loss_warmup_ratio
                 )
             if args.new_cotraining_optimizer:
+                logger.info('creating warmup optimizer for pretraining...')
                 optimizer_a, optimizer_b = create_optimizer(model_a, 
                     model_b, 
                     max_warmup_step)
