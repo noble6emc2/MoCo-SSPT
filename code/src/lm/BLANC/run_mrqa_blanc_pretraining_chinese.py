@@ -1403,10 +1403,14 @@ def main_cotraining(args):
                 model_a = torch.nn.DataParallel(model_a)
                 model_b = torch.nn.DataParallel(model_b)
 
+            max_warmup_step = int(
+                num_train_optimization_steps * 
+                args.moving_loss_warmup_ratio
+                )
             if args.new_cotraining_optimizer:
                 optimizer_a, optimizer_b = create_optimizer(model_a, 
                     model_b, 
-                    int(num_train_optimization_steps * args.moving_loss_warmup_ratio))
+                    max_warmup_step)
             else:
                 optimizer_a, optimizer_b = create_optimizer(model_a, 
                     model_b, num_train_optimization_steps)
@@ -1442,7 +1446,7 @@ def main_cotraining(args):
                     #Warm up in order to make Model A/B's hypothesis different
                     input_ids_a, input_mask_a, segment_ids_a, start_positions_a, end_positions_a = batch_a
                     input_ids_b, input_mask_b, segment_ids_b, start_positions_b, end_positions_b = batch_b
-                    if step_ratio < args.moving_loss_warmup_ratio:
+                    if global_step < max_warmup_step:
                         # warming up stage
                         model_a.train()
                         model_b.train()
@@ -1452,6 +1456,7 @@ def main_cotraining(args):
                     else:
                         # co-training stage
                         if args.new_cotraining_optimizer and first_in_cotraining:
+                            logger.info("creating new optimizer for cotraining...")
                             optimizer_a, optimizer_b = create_optimizer(model_a, 
                                 model_b,
                                 num_train_optimization_steps - global_step
@@ -1487,8 +1492,11 @@ def main_cotraining(args):
                             moving_loss_a = np.mean(lmb_window_list_a)
                             moving_loss_b = np.mean(lmb_window_list_b)
 
-                            lmbs_a = torch.tensor([args.lmb if l <= moving_loss_a else 0. for l in lmb_list_a]).to(device)
-                            lmbs_b = torch.tensor([args.lmb if l <= moving_loss_b else 0. for l in lmb_list_b]).to(device)
+                            lmbs_a = torch.tensor([args.lmb if l <= moving_loss_a else 0. for l in lmb_list_a])
+                            lmbs_b = torch.tensor([args.lmb if l <= moving_loss_b else 0. for l in lmb_list_b])
+                            if n_gpu == 1:
+                                lmbs_a = lmbs_a.to(device)
+                                lmbs_b = lmbs_b.to(device)
 
                             if args.debug:
                                 print("lmb_window_list_a", lmb_window_list_a, "lmb_window_list_b", lmb_window_list_b)
@@ -1503,9 +1511,12 @@ def main_cotraining(args):
                             top_k_index_b = set(np.argsort(lmb_list_b)[:math.ceil(args.theta * len(lmb_list_b))])
 
                             lmbs_a = torch.tensor([args.lmb if idx in top_k_index_a else 0.
-                                                    for idx in range(len(lmb_list_a))]).to(device)
+                                                    for idx in range(len(lmb_list_a))])
                             lmbs_b = torch.tensor([args.lmb if idx in top_k_index_b else 0.
-                                                    for idx in range(len(lmb_list_b))]).to(device)
+                                                    for idx in range(len(lmb_list_b))])
+                            if n_gpu == 1:
+                                lmbs_a = lmbs_a.to(device)
+                                lmbs_b = lmbs_b.to(device)
                                             
                             if args.debug:
                                 print("top_k_index_a", top_k_index_a, "top_k_index_b", top_k_index_b)
