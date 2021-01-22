@@ -1495,8 +1495,8 @@ def main_cotraining(args):
 
                             lmbs_a = torch.tensor([args.lmb if l <= moving_loss_a else 0. for l in lmb_list_a])
                             lmbs_b = torch.tensor([args.lmb if l <= moving_loss_b else 0. for l in lmb_list_b])
-                            mask_a = torch.tensor([1 if l <= moving_loss_a else 0 for l in lmb_list_a])
-                            mask_b = torch.tensor([1 if l <= moving_loss_b else 0 for l in lmb_list_b])
+                            mask_a = torch.tensor([idx for idx, l in enumerate(lmb_list_a) if l <= moving_loss_a])
+                            mask_b = torch.tensor([idx for idx, l in enumerate(lmb_list_b) if l <= moving_loss_b])
                             if n_gpu == 1:
                                 lmbs_a = lmbs_a.to(device)
                                 lmbs_b = lmbs_b.to(device)
@@ -1505,6 +1505,7 @@ def main_cotraining(args):
                                 print("lmb_window_list_a", lmb_window_list_a, "lmb_window_list_b", lmb_window_list_b)
                                 print("moving_loss_a", moving_loss_a, "moving_loss_b", moving_loss_b)
                                 print("lmbs_a", lmbs_a, "lmbs_b", lmbs_b)
+                                print("mask_a", mask_a, "mask_b", mask_b)
                                 input()
 
                             if args.is_idx_mask:
@@ -1521,10 +1522,8 @@ def main_cotraining(args):
                                                     for idx in range(len(lmb_list_a))])
                             lmbs_b = torch.tensor([args.lmb if idx in top_k_index_b else 0.
                                                     for idx in range(len(lmb_list_b))])
-                            mask_a = torch.tensor([1 if idx in top_k_index_a else 0
-                                                    for idx in range(len(lmb_list_a))])
-                            mask_b = torch.tensor([1 if idx in top_k_index_b else 0
-                                                    for idx in range(len(lmb_list_b))])
+                            mask_a = torch.tensor(list(top_k_index_a))
+                            mask_b = torch.tensor(list(top_k_index_b))
                             if n_gpu == 1:
                                 lmbs_a = lmbs_a.to(device)
                                 lmbs_b = lmbs_b.to(device)
@@ -1532,6 +1531,7 @@ def main_cotraining(args):
                             if args.debug:
                                 print("top_k_index_a", top_k_index_a, "top_k_index_b", top_k_index_b)
                                 print("lmbs_a", lmbs_a, "lmbs_b", lmbs_b)
+                                print("mask_a", mask_a, "mask_b", mask_b)
                                 input()
 
                             if args.is_idx_mask:
