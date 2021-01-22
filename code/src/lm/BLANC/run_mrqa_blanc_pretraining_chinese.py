@@ -1495,6 +1495,8 @@ def main_cotraining(args):
 
                             lmbs_a = torch.tensor([args.lmb if l <= moving_loss_a else 0. for l in lmb_list_a])
                             lmbs_b = torch.tensor([args.lmb if l <= moving_loss_b else 0. for l in lmb_list_b])
+                            mask_a = torch.tensor([1 if l <= moving_loss_a else 0 for l in lmb_list_a])
+                            mask_b = torch.tensor([1 if l <= moving_loss_b else 0 for l in lmb_list_b])
                             if n_gpu == 1:
                                 lmbs_a = lmbs_a.to(device)
                                 lmbs_b = lmbs_b.to(device)
@@ -1505,8 +1507,12 @@ def main_cotraining(args):
                                 print("lmbs_a", lmbs_a, "lmbs_b", lmbs_b)
                                 input()
 
-                            loss_a, _, _ = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, lmbs_a, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
-                            loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, lmbs_b, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+                            if args.is_idx_mask:
+                                loss_a, _, _ = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, lmbs=None, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb, batch_idx_mask=mask_a)
+                                loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, lmbs=None, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb, batch_idx_mask=mask_b)
+                            else:
+                                loss_a, _, _ = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, lmbs=lmbs_a, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb, batch_idx_mask=None)
+                                loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, lmbs=lmbs_b, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb, batch_idx_mask=None)
                         elif args.co_training_mode == 'data_cur':
                             top_k_index_a = set(np.argsort(lmb_list_a)[:math.ceil(args.theta * len(lmb_list_a))])
                             top_k_index_b = set(np.argsort(lmb_list_b)[:math.ceil(args.theta * len(lmb_list_b))])
@@ -1514,6 +1520,10 @@ def main_cotraining(args):
                             lmbs_a = torch.tensor([args.lmb if idx in top_k_index_a else 0.
                                                     for idx in range(len(lmb_list_a))])
                             lmbs_b = torch.tensor([args.lmb if idx in top_k_index_b else 0.
+                                                    for idx in range(len(lmb_list_b))])
+                            mask_a = torch.tensor([1 if idx in top_k_index_a else 0
+                                                    for idx in range(len(lmb_list_a))])
+                            mask_b = torch.tensor([1 if idx in top_k_index_b else 0
                                                     for idx in range(len(lmb_list_b))])
                             if n_gpu == 1:
                                 lmbs_a = lmbs_a.to(device)
@@ -1524,8 +1534,12 @@ def main_cotraining(args):
                                 print("lmbs_a", lmbs_a, "lmbs_b", lmbs_b)
                                 input()
 
-                            loss_a, _, _ = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, lmbs_a, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
-                            loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, lmbs_b, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+                            if args.is_idx_mask:
+                                loss_a, _, _ = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, lmbs=None, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb, batch_idx_mask=mask_a)
+                                loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, lmbs=None, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb, batch_idx_mask=mask_b)
+                            else:
+                                loss_a, _, _ = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, lmbs=lmbs_a, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb, batch_idx_mask=None)
+                                loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, lmbs=lmbs_b, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb, batch_idx_mask=None)
                         else:
                             raise Exception("Unsuppoted co training mode.")
 
@@ -2213,6 +2227,7 @@ if __name__ == "__main__":
         parser.add_argument('--moving_loss_warmup_ratio', type=float, default=0.3)
         parser.add_argument('--moving_loss_num', type=int, default=8)
         parser.add_argument('--new_cotraining_optimizer', type=bool, default=False)
+        parser.add_argument('--is_idx_mask', type=bool, default=False)
         args = parser.parse_args()
         args.output_dir_a = args.output_dir + "_a"
         args.output_dir_b = args.output_dir + "_b"
