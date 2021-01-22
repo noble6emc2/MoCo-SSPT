@@ -1513,6 +1513,8 @@ def main_cotraining(args):
                             if args.is_idx_mask:
                                 loss_a, _, _ = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, lmbs=None, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb, batch_idx_mask=mask_a)
                                 loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, lmbs=None, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb, batch_idx_mask=mask_b)
+                                loss_a = np.sum(loss_a) / np.sum(mask_a)
+                                loss_b = np.sum(loss_b) / np.sum(mask_b)
                             else:
                                 loss_a, _, _ = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, lmbs=lmbs_a, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb, batch_idx_mask=None)
                                 loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, lmbs=lmbs_b, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb, batch_idx_mask=None)
@@ -1543,6 +1545,8 @@ def main_cotraining(args):
                             if args.is_idx_mask:
                                 loss_a, _, _ = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, lmbs=None, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb, batch_idx_mask=mask_a)
                                 loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, lmbs=None, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb, batch_idx_mask=mask_b)
+                                loss_a = np.sum(loss_a) / np.sum(mask_a)
+                                loss_b = np.sum(loss_b) / np.sum(mask_b)
                             else:
                                 loss_a, _, _ = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, lmbs=lmbs_a, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb, batch_idx_mask=None)
                                 loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, lmbs=lmbs_b, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb, batch_idx_mask=None)
@@ -1551,7 +1555,6 @@ def main_cotraining(args):
 
 
                     
-
                     if n_gpu > 1:
                         loss_a = loss_a.mean()
                         loss_b = loss_b.mean()

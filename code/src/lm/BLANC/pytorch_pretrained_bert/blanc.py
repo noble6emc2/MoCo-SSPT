@@ -1268,12 +1268,12 @@ class BLANC(BertPreTrainedModel):
             
             if batch_idx_mask is not None:
                 loss_fct = CrossEntropyLoss(ignore_index=ignored_index, reduction='none')
-                start_loss = torch.sum(loss_fct(start_logits, start_positions) * batch_idx_mask) / torch.sum(batch_idx_mask)
-                end_loss = torch.sum(loss_fct(end_logits, end_positions) * batch_idx_mask) / torch.sum(batch_idx_mask)
+                start_loss = torch.sum(loss_fct(start_logits, start_positions) * batch_idx_mask)
+                end_loss = torch.sum(loss_fct(end_logits, end_positions) * batch_idx_mask)
                 f_loss = (start_loss \
                             + end_loss) / 2.0
                 total_loss = ((1.0 - lmb) * f_loss + 
-                    lmb * torch.sum(reduced_dist_total_losses * batch_idx_mask) / torch.sum(batch_idx_mask))
+                    lmb * torch.sum(reduced_dist_total_losses * batch_idx_mask))
                 return (total_loss, dist_total_loss, reduced_dist_total_losses)
             elif lmbs is None:
                 #print("No Lmbs !!!!!!!!!!")
