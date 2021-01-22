@@ -1267,10 +1267,10 @@ class BLANC(BertPreTrainedModel):
             dist_total_loss = - 2.0 * dist_total_loss
             
             if batch_idx_mask is not None:
-                start_logits = torch.index_select(start_logits, 0, batch_idx_mask)
-                end_logits = torch.index_select(end_logits, 0, batch_idx_mask)
-                start_positions = torch.index_select(start_positions, 0, batch_idx_mask)
-                end_positions = torch.index_select(end_positions, 0, batch_idx_mask)
+                start_logits = torch.masked_select(start_logits, batch_idx_mask)
+                end_logits = torch.masked_select(end_logits, batch_idx_mask)
+                start_positions = torch.masked_select(start_positions, batch_idx_mask)
+                end_positions = torch.masked_select(end_positions, batch_idx_mask)
                 loss_fct = CrossEntropyLoss(ignore_index=ignored_index)
                 start_loss = loss_fct(start_logits, start_positions)
                 end_loss = loss_fct(end_logits, end_positions)
