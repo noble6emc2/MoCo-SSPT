@@ -1495,8 +1495,8 @@ def main_cotraining(args):
 
                             lmbs_a = torch.tensor([args.lmb if l <= moving_loss_a else 0. for l in lmb_list_a])
                             lmbs_b = torch.tensor([args.lmb if l <= moving_loss_b else 0. for l in lmb_list_b])
-                            mask_a = torch.tensor([True if l <= moving_loss_a else False for idx, l in enumerate(lmb_list_a)])
-                            mask_b = torch.tensor([True if l <= moving_loss_b else False for idx, l in enumerate(lmb_list_b)])
+                            mask_a = torch.tensor([1 if l <= moving_loss_a else 0 for idx, l in enumerate(lmb_list_a)])
+                            mask_b = torch.tensor([1 if l <= moving_loss_b else 0 for idx, l in enumerate(lmb_list_b)])
                             if n_gpu == 1:
                                 lmbs_a = lmbs_a.to(device)
                                 lmbs_b = lmbs_b.to(device)
@@ -1524,9 +1524,9 @@ def main_cotraining(args):
                                                     for idx in range(len(lmb_list_a))])
                             lmbs_b = torch.tensor([args.lmb if idx in top_k_index_b else 0.
                                                     for idx in range(len(lmb_list_b))])
-                            mask_a = torch.tensor([True if idx in top_k_index_a else False
+                            mask_a = torch.tensor([1 if idx in top_k_index_a else 0
                                                     for idx in range(len(lmb_list_a))])
-                            mask_b = torch.tensor([True if idx in top_k_index_b else False
+                            mask_b = torch.tensor([1 if idx in top_k_index_b else 0
                                                     for idx in range(len(lmb_list_b))])
                             if n_gpu == 1:
                                 lmbs_a = lmbs_a.to(device)
