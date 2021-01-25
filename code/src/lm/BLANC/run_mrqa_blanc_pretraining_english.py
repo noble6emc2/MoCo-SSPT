@@ -774,9 +774,9 @@ def _compute_softmax(scores):
 
 def get_raw_scores(dataset, predictions, examples):
     answers = {}
-    for qa in dataset:
-        #for qa in example['qas']:
-        answers[qa['qid']] = qa['answers']
+    for example in dataset:
+        for qa in example['qas']:
+            answers[qa['qid']] = qa['answers']
 
     exact_scores = {}
     f1_scores = {}
@@ -1728,6 +1728,9 @@ def read_mrqa_examples(input_file, is_training,
     num_answers = 0
     datasets = []
     for i, entry in enumerate(input_data):
+        if i % 1000 == 0:
+            logger.info("Processing %d / %d.." % (i, len(input_data)))
+
         paragraph_text = entry["context"]
         doc_tokens = []
         char_to_word_offset = []
