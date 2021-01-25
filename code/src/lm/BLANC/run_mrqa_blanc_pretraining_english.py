@@ -1727,53 +1727,52 @@ def read_mrqa_examples(input_file, is_training,
     examples = []
     num_answers = 0
     datasets = []
-    for i, article in enumerate(input_data):
-        for entry in article["paragraphs"]:
-            paragraph_text = entry["context"]
-            doc_tokens = []
-            char_to_word_offset = []
-            prev_is_whitespace = True
-            for c in paragraph_text:
-                if is_whitespace(c):
-                    prev_is_whitespace = True
+    for i, entry in enumerate(input_data):
+        paragraph_text = entry["context"]
+        doc_tokens = []
+        char_to_word_offset = []
+        prev_is_whitespace = True
+        for c in paragraph_text:
+            if is_whitespace(c):
+                prev_is_whitespace = True
+            else:
+                if prev_is_whitespace:
+                    doc_tokens.append(c)
                 else:
-                    if prev_is_whitespace:
-                        doc_tokens.append(c)
-                    else:
-                        doc_tokens[-1] += c
-                    prev_is_whitespace = False
-                char_to_word_offset.append(len(doc_tokens) - 1)
+                    doc_tokens[-1] += c
+                prev_is_whitespace = False
+            char_to_word_offset.append(len(doc_tokens) - 1)
 
-            for qa in entry["qas"]:
-                qas_id = qa["qid"]
-                question_text = qa["question"]# .replace("UNK", replace_mask)
-                is_impossible = qa.get('is_impossible', False)
-                start_position = None
-                end_position = None
-                orig_answer_text = None
-                
-                answers = qa["detected_answers"]
-                # import ipdb
-                # ipdb.set_trace()
-                spans = sorted([span for spans in answers for span in spans['char_spans']])
-                # take first span
-                char_start, char_end = spans[0][0], spans[0][1]
-                orig_answer_text = paragraph_text[char_start:char_end+1]
-                start_position, end_position = char_to_word_offset[char_start], char_to_word_offset[char_end]
-                num_answers += sum([len(spans['char_spans']) for spans in answers])
+        for qa in entry["qas"]:
+            qas_id = qa["qid"]
+            question_text = qa["question"]# .replace("UNK", replace_mask)
+            is_impossible = qa.get('is_impossible', False)
+            start_position = None
+            end_position = None
+            orig_answer_text = None
+            
+            answers = qa["detected_answers"]
+            # import ipdb
+            # ipdb.set_trace()
+            spans = sorted([span for spans in answers for span in spans['char_spans']])
+            # take first span
+            char_start, char_end = spans[0][0], spans[0][1]
+            orig_answer_text = paragraph_text[char_start:char_end+1]
+            start_position, end_position = char_to_word_offset[char_start], char_to_word_offset[char_end]
+            num_answers += sum([len(spans['char_spans']) for spans in answers])
 
-                example = MRQAExample(
-                    qas_id=qas_id,
-                    question_text=question_text, #question
-                    #paragraph_text=paragraph_text, # context text
-                    doc_tokens=doc_tokens, #passage text
-                    orig_answer_text=orig_answer_text, # answer text
-                    start_positions=start_position, #answer start
-                    end_positions=end_position, #answer end
-                    start_position=start_position,
-                    end_position=end_position,
-                    is_impossible=is_impossible)
-                examples.append(example)
+            example = MRQAExample(
+                qas_id=qas_id,
+                question_text=question_text, #question
+                #paragraph_text=paragraph_text, # context text
+                doc_tokens=doc_tokens, #passage text
+                orig_answer_text=orig_answer_text, # answer text
+                start_positions=start_position, #answer start
+                end_positions=end_position, #answer end
+                start_position=start_position,
+                end_position=end_position,
+                is_impossible=is_impossible)
+            examples.append(example)
 
     logger.info('Num avg answers: {}'.format(num_answers / len(examples)))
     return examples
