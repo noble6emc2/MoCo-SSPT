@@ -25,7 +25,7 @@ sys.path.append(os.path.dirname(__file__))
 
 import numpy as np
 import torch
-import pretrain_dataloader_chinese as cn_dataloader
+import pretrain_dataloader_english as en_dataloader
 import datetime
 from torch.utils.data import DataLoader, TensorDataset
 from pytorch_pretrained_bert.file_utils import PYTORCH_PRETRAINED_BERT_CACHE
@@ -34,7 +34,7 @@ from pytorch_pretrained_bert.blanc import BLANC
 from pytorch_pretrained_bert.optimization import BertAdam, warmup_linear
 from pytorch_pretrained_bert.tokenization import BasicTokenizer, BertTokenizer
 from pytorch_pretrained_bert.tokenization import _is_punctuation, _is_whitespace, _is_control
-from mrqa_official_eval import exact_match_score, f1_score, metric_max_over_ground_truths
+from mrqa_official_eval import exact_en_match_score, f1_en_score, metric_max_over_ground_truths
 
 PRED_FILE = "predictions.json"
 EVAL_FILE = "eval_results.txt"
@@ -197,9 +197,9 @@ class InputFeatures(object):
         return s
 
 
-def read_chinese_examples(line_list, is_training, 
-    first_answer_only, replace_mask, do_lower_case,
-    remove_query_in_passage):
+
+def read_english_examples(line_list, is_training, 
+    first_answer_only, replace_mask, do_lower_case):
     """Read a Chinese json file for pretraining into a list of MRQAExample."""
     input_data = [json.loads(line) for line in line_list] #.decode('utf-8').strip()
 
@@ -210,123 +210,120 @@ def read_chinese_examples(line_list, is_training,
         cat = unicodedata.category(c)
         if cat == "Zs":
             return True
-            
+
         return False
 
     examples = []
     num_answers = 0
     for i, article in enumerate(input_data):
-        for entry in article["paragraphs"]:
-            paragraph_text = entry["context"].strip()
-            raw_doc_tokens = tokenize_chinese(paragraph_text, 
-                    masking = None,
-                    do_lower_case= do_lower_case)
-            doc_tokens = []
-            char_to_word_offset = []
-            prev_is_whitespace = True
-            
-            k = 0
-            temp_word = ""
-            for c in paragraph_text:
-                if is_whitespace(c):
-                    char_to_word_offset.append(k - 1)
-                    continue
+        paragraph_text = article["passage"].strip()
+        doc_tokens = []
+        char_to_word_offset = []
+        prev_is_whitespace = True
+        for c in paragraph_text:
+            if is_whitespace(c):
+                prev_is_whitespace = True
+            else:
+                if prev_is_whitespace:
+                    doc_tokens.append(c)
                 else:
-                    temp_word += c
-                    char_to_word_offset.append(k)
+                    doc_tokens[-1] += c
+                prev_is_whitespace = False
+            char_to_word_offset.append(len(doc_tokens) - 1)
 
-                if do_lower_case:
-                    temp_word = temp_word.lower()
+        #for a_id, answer in enumerate(article["answers"]):
+        qas_id = article["qid"]
+        if article["question"].find('[BLANK]') == -1:
+            print(f"WARNING: Cannot Find [BLANK] in Question %s" % qas_id)
+            continue
 
-                if temp_word == raw_doc_tokens[k]:
-                    doc_tokens.append(temp_word)
-                    temp_word = ""
-                    k += 1
+        '''if remove_query_in_passage:
+            query = qa["question"]
+            mask_start = query.find("UNK")
+            mask_end = mask_start + 3
+            pattern = (re.escape(unicodedata.normalize('NFKC', query[:mask_start].strip())) + 
+                ".*" + re.escape(unicodedata.normalize('NFKC', query[mask_end:].strip())))
+            if re.search(pattern,
+                unicodedata.normalize('NFKC', paragraph_text)) is not None:
+                #print(f"WARNING: Query in Passage Detected in Question %s" % qas_id)
+                #print("Question", query, "Passage", paragraph_text)
+                continue'''
 
-            if k != len(raw_doc_tokens):
-                logger.info("Warning: paragraph '{}' tokenization error ".format(paragraph_text))
+        question_text = article["question"].replace("[BLANK]", replace_mask)
+        start_position = None
+        end_position = None
+        orig_answer_text = None
+        is_impossible = False
+        
+        answers = [
+            {
+                'text': ans,
+                'answer_all_start': [m.start() 
+                    for m in re.finditer(re.escape(ans), paragraph_text)]
+            }
+            for ans in article["answers"]
+            ]
+        num_answers += sum([len(spans['answer_all_start']) for spans in answers])
+        
+        # import ipdb
+        # ipdb.set_trace()
+        spans = sorted([[start, start + len(ans['text']) - 1, ans['text']] 
+            for ans in answers for start in ans['answer_all_start']])
+        #print("spans", spans)
+        # take first span
+        if first_answer_only:
+            include_span_num = 1
+        else:
+            include_span_num = len(spans)
+
+        start_positions = []
+        end_positions = []
+        #print("spans length:", len(spans))
+        #print("article[\"answers\"]", article["answers"])
+        #input()
+        for i in range(min(include_span_num, len(spans))):
+            char_start, char_end, answer_text = spans[i][0], spans[i][1], spans[i][2]
+            orig_answer_text = paragraph_text[char_start:char_end+1]
+            #print("orig_answer_text", orig_answer_text)
+            if orig_answer_text != answer_text:
+                logger.info("Answer error: {}, Original {}".format(
+                    answer_text, orig_answer_text))
                 continue
+            
+            start_position, end_position = char_to_word_offset[char_start], char_to_word_offset[char_end]
+            #print("start_position", "end_position", start_position, end_position)
+            #print("doc_tokens", doc_tokens)
+            start_positions.append(start_position)
+            end_positions.append(end_position)
 
-            for qa in entry["qas"]:
-                qas_id = article["id"] + "_" + entry["id"] + "_" + qa["id"]
-                if qa["question"].find('UNK') == -1:
-                    print(f"WARNING: Cannot Find UNK in Question %s" % qas_id)
-                    continue
+        if len(spans) == 0:
+            start_positions.append(0)
+            end_positions.append(0)
+            orig_answer_text = ''
+            is_impossible = True
 
-                if remove_query_in_passage:
-                    query = qa["question"]
-                    mask_start = query.find("UNK")
-                    mask_end = mask_start + 3
-                    pattern = (re.escape(unicodedata.normalize('NFKC', query[:mask_start].strip())) + 
-                        ".*" + re.escape(unicodedata.normalize('NFKC', query[mask_end:].strip())))
-                    if re.search(pattern,
-                        unicodedata.normalize('NFKC', paragraph_text)) is not None:
-                        #print(f"WARNING: Query in Passage Detected in Question %s" % qas_id)
-                        #print("Question", query, "Passage", paragraph_text)
-                        continue
+        if first_answer_only:
+            start_positions = start_positions[0]
+            end_positions = end_positions[0]
 
-                question_text = qa["question"].replace("UNK", replace_mask)
-                is_impossible = qa.get('is_impossible', False)
-                start_position = None
-                end_position = None
-                orig_answer_text = None
-                
-                answers = qa["answers"]
-                num_answers += sum([len(spans['answer_all_start']) for spans in answers])
-                
-                # import ipdb
-                # ipdb.set_trace()
-                spans = sorted([[start, start + len(ans['text']) - 1, ans['text']] 
-                    for ans in answers for start in ans['answer_all_start']])
-                #print("spans", spans)
-                # take first span
-                if first_answer_only:
-                    include_span_num = 1
-                else:
-                    include_span_num = len(spans)
-
-                start_positions = []
-                end_positions = []
-                for i in range(min(include_span_num, len(spans))):
-                    char_start, char_end, answer_text = spans[i][0], spans[i][1], spans[i][2]
-                    orig_answer_text = paragraph_text[char_start:char_end+1]
-                    #print("orig_answer_text", orig_answer_text)
-                    if orig_answer_text != answer_text:
-                        logger.info("Answer error: {}, Original {}".format(
-                            answer_text, orig_answer_text))
-                        continue
-                    
-                    start_position, end_position = char_to_word_offset[char_start], char_to_word_offset[char_end]
-                    #print("start_position", "end_position", start_position, end_position)
-                    #print("doc_tokens", doc_tokens)
-                    start_positions.append(start_position)
-                    end_positions.append(end_position)
-
-                if len(spans) == 0:
-                    start_positions.append(0)
-                    end_positions.append(0)
-
-                if first_answer_only:
-                    start_positions = start_positions[0]
-                    end_positions = end_positions[0]
-
-                example = MRQAExample(
-                    qas_id=qas_id,
-                    question_text=question_text, #question
-                    #paragraph_text=paragraph_text, # context text
-                    doc_tokens=doc_tokens, #passage text
-                    orig_answer_text=orig_answer_text, # answer text
-                    start_positions=start_positions, #answer start
-                    end_positions=end_positions, #answer end
-                    is_impossible=is_impossible)
-                examples.append(example)
+        example = MRQAExample(
+            qas_id=qas_id,
+            question_text=question_text, #question
+            #paragraph_text=paragraph_text, # context text
+            doc_tokens=doc_tokens, #passage text
+            orig_answer_text=orig_answer_text, # answer text
+            start_positions=start_positions, #answer start
+            end_positions=end_positions, #answer end
+            is_impossible=is_impossible
+            )
+        examples.append(example)
 
 
     #logger.info('Num avg answers: {}'.format(num_answers / len(examples)))
     return examples
 
 
-def convert_chinese_examples_to_features(examples, tokenizer, max_seq_length,
+def convert_english_examples_to_features(examples, tokenizer, max_seq_length,
                                  doc_stride, max_query_length, is_training,
                                  first_answer_only):
     """Loads a data file into a list of `InputBatch`s."""
@@ -792,9 +789,9 @@ def get_raw_scores(dataset, predictions, examples):
             continue
         prediction = predictions[qid]['text']
         exact_scores[qid] = metric_max_over_ground_truths(
-            exact_match_score, prediction, ground_truths)[0]
+            exact_en_match_score, prediction, ground_truths)[0]
         scores[qid] = metric_max_over_ground_truths(
-            f1_score, prediction, ground_truths)
+            f1_en_score, prediction, ground_truths)
         f1_scores[qid] = scores[qid][0]
         precision_scores[qid] = scores[qid][1]
         recall_scores[qid] = scores[qid][2]
@@ -1087,7 +1084,7 @@ def main(args):
                 logger.info("Start epoch #{} (lr = {})...".format(epoch, lr))
                 running_loss = 0.0
                 for step, batch in tqdm(enumerate(
-                    cn_dataloader.get_training_batch_chinese(
+                    en_dataloader.get_training_batch_english(
                         args, co_training = False, p_list = p_list)), 
                         total = args.num_iteration):
                     if step >= args.num_iteration:
@@ -1335,21 +1332,8 @@ def main_cotraining(args):
         result_a = None
         result_b = None
         lrs = [args.learning_rate] if args.learning_rate else [1e-6, 2e-6, 3e-6, 5e-6, 1e-5, 2e-5, 3e-5, 5e-5]
-        for lr in lrs:
-            model_a, pretrained_weights_a = BLANC.from_pretrained(
-                args.model, cache_dir=PYTORCH_PRETRAINED_BERT_CACHE)
-            model_b, pretrained_weights_b = BLANC.from_pretrained(
-                args.model, cache_dir=PYTORCH_PRETRAINED_BERT_CACHE)
-            if args.fp16:
-                model_a.half()
-                model_b.half()
-
-            model_a.to(device)
-            model_b.to(device)
-            if n_gpu > 1:
-                model_a = torch.nn.DataParallel(model_a)
-                model_b = torch.nn.DataParallel(model_b)
-
+        
+        def create_optimizer(model_a, model_b, num_train_optimization_steps):
             param_optimizer_a = list(model_a.named_parameters())
             param_optimizer_b = list(model_b.named_parameters())
             param_optimizer_a = [n for n in param_optimizer_a if 'pooler' not in n[0]]
@@ -1398,18 +1382,50 @@ def main_cotraining(args):
                                      lr=lr,
                                      warmup=args.warmup_proportion,
                                      t_total=num_train_optimization_steps)
+
+            return optimizer_a, optimizer_b
+
+        for lr in lrs:
+            model_a, pretrained_weights_a = BLANC.from_pretrained(
+                args.model, cache_dir=PYTORCH_PRETRAINED_BERT_CACHE)
+            model_b, pretrained_weights_b = BLANC.from_pretrained(
+                args.model, cache_dir=PYTORCH_PRETRAINED_BERT_CACHE)
+            if args.fp16:
+                model_a.half()
+                model_b.half()
+
+            model_a.to(device)
+            model_b.to(device)
+            if n_gpu > 1:
+                model_a = torch.nn.DataParallel(model_a)
+                model_b = torch.nn.DataParallel(model_b)
+
+            max_warmup_step = int(
+                num_train_optimization_steps * 
+                args.moving_loss_warmup_ratio
+                )
+            if args.new_cotraining_optimizer:
+                logger.info('creating warmup optimizer for pretraining...')
+                optimizer_a, optimizer_b = create_optimizer(model_a, 
+                    model_b, 
+                    max_warmup_step)
+            else:
+                optimizer_a, optimizer_b = create_optimizer(model_a, 
+                    model_b, num_train_optimization_steps)
+
             global_step = 0
             start_time = time.time()
             lmb_window_list_a = []
             lmb_window_list_b = []
             from tqdm import tqdm
             p_list = []
+            first_in_cotraining = True
             for epoch in range(int(args.num_train_epochs)):
                 logger.info("Start epoch #{} (lr = {})...".format(epoch, lr))
                 running_loss_a = 0.0
                 running_loss_b = 0.0
                 for step, (batch_a, batch_b) in tqdm(enumerate(
-                    cn_dataloader.get_training_batch_chinese(
+                    en_dataloader.get_training_batch_english(
                         args, co_training = True, p_list = p_list)),
                         total = args.num_iteration):
                     if step >= args.num_iteration:
@@ -1428,7 +1444,7 @@ def main_cotraining(args):
                     #Warm up in order to make Model A/B's hypothesis different
                     input_ids_a, input_mask_a, segment_ids_a, start_positions_a, end_positions_a = batch_a
                     input_ids_b, input_mask_b, segment_ids_b, start_positions_b, end_positions_b = batch_b
-                    if step_ratio < args.moving_loss_warmup_ratio:
+                    if global_step < max_warmup_step:
                         # warming up stage
                         model_a.train()
                         model_b.train()
@@ -1437,6 +1453,14 @@ def main_cotraining(args):
                         loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
                     else:
                         # co-training stage
+                        if args.new_cotraining_optimizer and first_in_cotraining:
+                            logger.info("creating new optimizer for cotraining...")
+                            optimizer_a, optimizer_b = create_optimizer(model_a, 
+                                model_b,
+                                num_train_optimization_steps - global_step
+                                )
+                            first_in_cotraining = False
+                            
                         model_a.eval()
                         model_b.eval()
 
@@ -1468,15 +1492,29 @@ def main_cotraining(args):
 
                             lmbs_a = torch.tensor([args.lmb if l <= moving_loss_a else 0. for l in lmb_list_a])
                             lmbs_b = torch.tensor([args.lmb if l <= moving_loss_b else 0. for l in lmb_list_b])
+                            mask_a = torch.tensor([1 if l <= moving_loss_a else 0 for idx, l in enumerate(lmb_list_a)])
+                            mask_b = torch.tensor([1 if l <= moving_loss_b else 0 for idx, l in enumerate(lmb_list_b)])
+                            if n_gpu == 1:
+                                lmbs_a = lmbs_a.to(device)
+                                lmbs_b = lmbs_b.to(device)
+                                mask_a = mask_a.to(device)
+                                mask_b = mask_b.to(device)
 
                             if args.debug:
                                 print("lmb_window_list_a", lmb_window_list_a, "lmb_window_list_b", lmb_window_list_b)
                                 print("moving_loss_a", moving_loss_a, "moving_loss_b", moving_loss_b)
                                 print("lmbs_a", lmbs_a, "lmbs_b", lmbs_b)
+                                print("mask_a", mask_a, "mask_b", mask_b)
                                 input()
 
-                            loss_a, _, _ = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, lmbs_a, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
-                            loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, lmbs_b, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+                            if args.is_idx_mask:
+                                loss_a, _, _ = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, lmbs=None, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb, batch_idx_mask=mask_a)
+                                loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, lmbs=None, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb, batch_idx_mask=mask_b)
+                                loss_a = torch.sum(loss_a) / torch.sum(mask_a)
+                                loss_b = torch.sum(loss_b) / torch.sum(mask_b)
+                            else:
+                                loss_a, _, _ = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, lmbs=lmbs_a, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb, batch_idx_mask=None)
+                                loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, lmbs=lmbs_b, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb, batch_idx_mask=None)
                         elif args.co_training_mode == 'data_cur':
                             top_k_index_a = set(np.argsort(lmb_list_a)[:math.ceil(args.theta * len(lmb_list_a))])
                             top_k_index_b = set(np.argsort(lmb_list_b)[:math.ceil(args.theta * len(lmb_list_b))])
@@ -1485,20 +1523,35 @@ def main_cotraining(args):
                                                     for idx in range(len(lmb_list_a))])
                             lmbs_b = torch.tensor([args.lmb if idx in top_k_index_b else 0.
                                                     for idx in range(len(lmb_list_b))])
+                            mask_a = torch.tensor([1 if idx in top_k_index_a else 0
+                                                    for idx in range(len(lmb_list_a))])
+                            mask_b = torch.tensor([1 if idx in top_k_index_b else 0
+                                                    for idx in range(len(lmb_list_b))])
+                            if n_gpu == 1:
+                                lmbs_a = lmbs_a.to(device)
+                                lmbs_b = lmbs_b.to(device)
+                                mask_a = mask_a.to(device)
+                                mask_b = mask_b.to(device)
                                             
                             if args.debug:
                                 print("top_k_index_a", top_k_index_a, "top_k_index_b", top_k_index_b)
                                 print("lmbs_a", lmbs_a, "lmbs_b", lmbs_b)
+                                print("mask_a", mask_a, "mask_b", mask_b)
                                 input()
 
-                            loss_a, _, _ = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, lmbs_a, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
-                            loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, lmbs_b, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+                            if args.is_idx_mask:
+                                loss_a, _, _ = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, lmbs=None, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb, batch_idx_mask=mask_a)
+                                loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, lmbs=None, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb, batch_idx_mask=mask_b)
+                                loss_a = torch.sum(loss_a) / torch.sum(mask_a)
+                                loss_b = torch.sum(loss_b) / torch.sum(mask_b)
+                            else:
+                                loss_a, _, _ = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, lmbs=lmbs_a, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb, batch_idx_mask=None)
+                                loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, lmbs=lmbs_b, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb, batch_idx_mask=None)
                         else:
                             raise Exception("Unsuppoted co training mode.")
 
 
                     
-
                     if n_gpu > 1:
                         loss_a = loss_a.mean()
                         loss_b = loss_b.mean()
@@ -1578,24 +1631,32 @@ def main_cotraining(args):
 
                         if save_model:
                             model_to_save = model_a.module if hasattr(model_a, 'module') else model_a
-                            output_model_file = os.path.join(args.output_dir_a, WEIGHTS_NAME)
-                            output_config_file = os.path.join(args.output_dir_a, CONFIG_NAME)
+                            output_dir_a_iter = args.output_dir_a + '_iter_%d' % step
+                            output_dir_b_iter = args.output_dir_b + '_iter_%d' % step
+                            if not os.path.exists(output_dir_a_iter):
+                                os.makedirs(output_dir_a_iter)
+
+                            if not os.path.exists(output_dir_b_iter):
+                                os.makedirs(output_dir_b_iter)
+
+                            output_model_file = os.path.join(output_dir_a_iter, WEIGHTS_NAME)
+                            output_config_file = os.path.join(output_dir_a_iter, CONFIG_NAME)
                             torch.save(model_to_save.state_dict(), output_model_file)
                             model_to_save.config.to_json_file(output_config_file)
-                            tokenizer.save_vocabulary(args.output_dir_a)
+                            tokenizer.save_vocabulary(output_dir_a_iter)
                             if result_a:
-                                with open(os.path.join(args.output_dir_a, EVAL_FILE), "w") as writer:
+                                with open(os.path.join(output_dir_a_iter, EVAL_FILE), "w") as writer:
                                     for key in sorted(result_a.keys()):
                                         writer.write("%s = %s\n" % (key, str(result_a[key])))
 
                             model_to_save = model_b.module if hasattr(model_b, 'module') else model_b
-                            output_model_file = os.path.join(args.output_dir_b, WEIGHTS_NAME)
-                            output_config_file = os.path.join(args.output_dir_b, CONFIG_NAME)
+                            output_model_file = os.path.join(output_dir_b_iter, WEIGHTS_NAME)
+                            output_config_file = os.path.join(output_dir_b_iter, CONFIG_NAME)
                             torch.save(model_to_save.state_dict(), output_model_file)
                             model_to_save.config.to_json_file(output_config_file)
-                            tokenizer.save_vocabulary(args.output_dir_b)
+                            tokenizer.save_vocabulary(output_dir_b_iter)
                             if result_b:
-                                with open(os.path.join(args.output_dir_b, EVAL_FILE), "w") as writer:
+                                with open(os.path.join(output_dir_b_iter, EVAL_FILE), "w") as writer:
                                     for key in sorted(result_b.keys()):
                                         writer.write("%s = %s\n" % (key, str(result_b[key])))
 
@@ -1649,23 +1710,18 @@ def main_cotraining(args):
                 writer.write("%s = %s\n" % (key, str(result_b[key])))
 
 
-def read_crmc_examples(input_file, is_training, 
+def read_mrqa_examples(input_file, is_training, 
     first_answer_only, do_lower_case,
     remove_query_in_passage):
     """Read crmc json file for pretraining into a list of MRQAExample."""
-    with open(input_file, 'r', encoding='utf-8') as fin:
+    with gzip.GzipFile(input_file, 'r') as reader:
         # skip header
-        input_js = json.load(fin)
-        input_data = input_js["data"]
+        content = reader.read().decode('utf-8').strip().split('\n')[1:]
+        input_data = [json.loads(line) for line in content]
 
     def is_whitespace(c):
         if c == " " or c == "\t" or c == "\r" or c == "\n" or ord(c) == 0x202F:
-            return True
-
-        cat = unicodedata.category(c)
-        if cat == "Zs":
-            return True
-            
+            return True 
         return False
 
     examples = []
@@ -1673,130 +1729,38 @@ def read_crmc_examples(input_file, is_training,
     datasets = []
     for i, article in enumerate(input_data):
         for entry in article["paragraphs"]:
-            paragraph_text = entry["context"].strip()
-            raw_doc_tokens = tokenize_chinese(paragraph_text, 
-                    masking = None,
-                    do_lower_case= do_lower_case)
+            paragraph_text = entry["context"]
             doc_tokens = []
             char_to_word_offset = []
             prev_is_whitespace = True
-            
-            k = 0
-            temp_word = ""
             for c in paragraph_text:
                 if is_whitespace(c):
-                    char_to_word_offset.append(k - 1)
-                    continue
+                    prev_is_whitespace = True
                 else:
-                    temp_word += c
-                    char_to_word_offset.append(k)
-
-                if do_lower_case:
-                    temp_word = temp_word.lower()
-
-                if temp_word == raw_doc_tokens[k]:
-                    doc_tokens.append(temp_word)
-                    temp_word = ""
-                    k += 1
-
-            if k != len(raw_doc_tokens):
-                logger.info("Warning: paragraph '{}' tokenization error'{}'".format(paragraph_text))
-                continue
+                    if prev_is_whitespace:
+                        doc_tokens.append(c)
+                    else:
+                        doc_tokens[-1] += c
+                    prev_is_whitespace = False
+                char_to_word_offset.append(len(doc_tokens) - 1)
 
             for qa in entry["qas"]:
-                qas_id = qa["id"]
-                '''if qa["question"].find('UNK') == -1:
-                    logger.info(f"WARNING: Cannot Find UNK in Question %s" % qas_id)
-                    continue'''
-
-                if remove_query_in_passage:
-                    query = qa["question"]
-                    mask_start = query.find("UNK")
-                    mask_end = mask_start + 3
-                    pattern = (re.escape(unicodedata.normalize('NFKC', query[:mask_start].strip())) + 
-                        ".*" + re.escape(unicodedata.normalize('NFKC', query[mask_end:].strip())))
-                    if re.search(pattern,
-                        unicodedata.normalize('NFKC', paragraph_text)) is not None:
-                        #print(f"WARNING: Query in Passage Detected in Question %s" % qas_id)
-                        #print("Question", query, "Passage", paragraph_text)
-                        continue
-
+                qas_id = qa["qid"]
                 question_text = qa["question"]# .replace("UNK", replace_mask)
                 is_impossible = qa.get('is_impossible', False)
                 start_position = None
                 end_position = None
                 orig_answer_text = None
                 
-                answers = qa["answers"]
-                num_answers += len(answers)
-                
+                answers = qa["detected_answers"]
                 # import ipdb
                 # ipdb.set_trace()
-                '''
-                [
-                    [ans['answer_start'] + 1, 
-                    ans['answer_start'] + len(ans['text']), 
-                    ans['text']] 
-                    for ans in answers]
-                '''
-                ans_list = []
-                answer_text_list = []
-                for ans in answers:
-                    answer_text_list.append(ans['text'])
-                    if ans['answer_start'] == -1:
-                        continue
-
-                    if paragraph_text[ans['answer_start']:].startswith(ans['text']):
-                        ans_list.append([ans['answer_start'], 
-                            ans['answer_start'] + len(ans['text']) - 1, 
-                            ans['text']]
-                            )
-                    elif paragraph_text[ans['answer_start'] - 2:].startswith(ans['text']):
-                        ans_list.append([ans['answer_start'] - 2, 
-                            ans['answer_start'] + len(ans['text']) - 3, 
-                            ans['text']]
-                            )
-                    else:
-                        ans_list.append([ans['answer_start'] - 1, 
-                            ans['answer_start'] + len(ans['text']) - 2, 
-                            ans['text']]
-                            )
-
-                spans = sorted(ans_list)
-                #print("spans", spans)
+                spans = sorted([span for spans in answers for span in spans['char_spans']])
                 # take first span
-                if first_answer_only:
-                    include_span_num = 1
-                else:
-                    include_span_num = len(spans)
-
-                start_positions = []
-                end_positions = []
-                for i in range(min(include_span_num, len(spans))):
-                    char_start, char_end, answer_text = spans[i][0], spans[i][1], spans[i][2]
-                    orig_answer_text = paragraph_text[char_start:char_end+1]
-                    #print("orig_answer_text", orig_answer_text)
-                    if orig_answer_text != answer_text:
-                        logger.info("Answer error: {}, Original {}".format(
-                            answer_text, orig_answer_text))
-                        print(paragraph_text[char_start:])
-                        continue
-                    
-                    start_position, end_position = char_to_word_offset[char_start], char_to_word_offset[char_end]
-                    #print("start_position", "end_position", start_position, end_position)
-                    #print("doc_tokens", doc_tokens)
-                    start_positions.append(start_position)
-                    end_positions.append(end_position)
-
-                if len(spans) == 0:
-                    start_positions.append(0)
-                    end_positions.append(0)
-
-                if first_answer_only:
-                    start_positions = start_positions[0]
-                    end_positions = end_positions[0]
-
-                datasets.append({'qid': qas_id, 'answers': answer_text_list})
+                char_start, char_end = spans[0][0], spans[0][1]
+                orig_answer_text = paragraph_text[char_start:char_end+1]
+                start_position, end_position = char_to_word_offset[char_start], char_to_word_offset[char_end]
+                num_answers += sum([len(spans['char_spans']) for spans in answers])
 
                 example = MRQAExample(
                     qas_id=qas_id,
@@ -1804,16 +1768,15 @@ def read_crmc_examples(input_file, is_training,
                     #paragraph_text=paragraph_text, # context text
                     doc_tokens=doc_tokens, #passage text
                     orig_answer_text=orig_answer_text, # answer text
-                    start_positions=start_positions, #answer start
-                    end_positions=end_positions, #answer end
-                    start_position=start_positions,
-                    end_position=end_positions,
+                    start_positions=start_position, #answer start
+                    end_positions=end_position, #answer end
+                    start_position=start_position,
+                    end_position=end_position,
                     is_impossible=is_impossible)
                 examples.append(example)
 
-
-    #logger.info('Num avg answers: {}'.format(num_answers / len(examples)))
-    return examples, datasets
+    logger.info('Num avg answers: {}'.format(num_answers / len(examples)))
+    return examples
 
 def main_finetuning(args):
     device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
@@ -1877,12 +1840,16 @@ def main_finetuning(args):
             max_query_length=args.max_query_length,
             is_training=False)
         '''
-        eval_examples, eval_dataset = read_crmc_examples(
+        with gzip.GzipFile(args.dev_file, 'r') as reader:
+            content = reader.read().decode('utf-8').strip().split('\n')[1:]
+            eval_dataset = [json.loads(line) for line in content]
+            
+        eval_examples = read_mrqa_examples(
                 args.dev_file, is_training=True, 
                 first_answer_only=True, 
                 do_lower_case=True,
                 remove_query_in_passage=False)
-        eval_features = convert_chinese_examples_to_features(
+        eval_features = convert_english_examples_to_features(
                     examples=eval_examples,
                     tokenizer=tokenizer,
                     max_seq_length=args.max_seq_length,
@@ -1902,12 +1869,12 @@ def main_finetuning(args):
         eval_dataloader = DataLoader(eval_data, batch_size=args.eval_batch_size)
 
     if args.do_train:
-        train_examples, _ = read_crmc_examples(
+        train_examples = read_mrqa_examples(
                 args.train_file, is_training=True, 
                 first_answer_only=True, 
                 do_lower_case=True,
                 remove_query_in_passage=False)
-        train_features = convert_chinese_examples_to_features(
+        train_features = convert_english_examples_to_features(
                 examples=train_examples,
                 tokenizer=tokenizer,
                 max_seq_length=args.max_seq_length,
@@ -2162,7 +2129,7 @@ if __name__ == "__main__":
         parser.add_argument('--num_iteration', type=int, default=9375)
         parser.add_argument('--lmb', type=float, default=0.5)
         parser.add_argument('--do_lower_case', type=bool, default=True)
-        parser.add_argument('--remove_query_in_passage', type=bool, default=True)
+        #parser.add_argument('--remove_query_in_passage', type=bool, default=True)
         parser.add_argument('--co_training_mode', type=str, default='data_cur')
         parser.add_argument('--enqueue_thread_num', type=int, default=4)
         parser.add_argument('--is_co_training', type=bool, default=False)
@@ -2171,11 +2138,14 @@ if __name__ == "__main__":
         parser.add_argument('--theta', type=float, default=0.8)
         parser.add_argument('--moving_loss_warmup_ratio', type=float, default=0.3)
         parser.add_argument('--moving_loss_num', type=int, default=8)
+        parser.add_argument('--new_cotraining_optimizer', type=bool, default=False)
+        parser.add_argument('--is_idx_mask', type=bool, default=False)
         args = parser.parse_args()
         args.output_dir_a = args.output_dir + "_a"
         args.output_dir_b = args.output_dir + "_b"
 
-        print('------is_co_training-----', args.is_co_training)
+        print('------is_co_training-----: %s' % args.is_co_training)
+        print('------new_cotraining_optimizer-----: %s' % args.new_cotraining_optimizer)
 
         if args.is_co_training:
             logger.info('enter cotraining....')
