@@ -152,7 +152,8 @@ class InputFeatures(object):
                  start_positions=None,
                  end_positions=None,
                  start_position=None,
-                 end_position=None):
+                 end_position=None,
+                 is_impossible=None):
         self.unique_id = unique_id
         self.example_index = example_index
         self.doc_span_index = doc_span_index
@@ -166,6 +167,7 @@ class InputFeatures(object):
         self.end_positions = end_positions
         self.start_position = start_position
         self.end_position = end_position
+        self.is_impossible = is_impossible
 
     def __str__(self):
         return self.__repr__()
@@ -2512,7 +2514,7 @@ def main_model_testing(args):
     
     with open(args.dev_file) as f:
         dataset_json = json.load(f)
-        
+
     eval_dataset = dataset_json['data']
     eval_examples = read_squad_examples(
             input_file=args.dev_file, is_training=False,
