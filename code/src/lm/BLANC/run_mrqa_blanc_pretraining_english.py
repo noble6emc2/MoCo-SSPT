@@ -2506,10 +2506,14 @@ def main_model_testing(args):
     if n_gpu > 1:
         model = torch.nn.DataParallel(model)
 
-    with gzip.GzipFile(args.dev_file, 'r') as reader:
+    '''with gzip.GzipFile(args.dev_file, 'r') as reader:
             content = reader.read().decode('utf-8').strip().split('\n')[1:]
-            eval_dataset = [json.loads(line) for line in content]
-            
+            eval_dataset = [json.loads(line) for line in content]'''
+    
+    with open(args.dev_file) as f:
+        dataset_json = json.load(f)
+        
+    eval_dataset = dataset_json['data']
     eval_examples = read_squad_examples(
             input_file=args.dev_file, is_training=False,
             version_2_with_negative=args.version_2_with_negative
