@@ -30,7 +30,7 @@ import datetime
 from torch.utils.data import DataLoader, TensorDataset
 from pytorch_pretrained_bert.file_utils import PYTORCH_PRETRAINED_BERT_CACHE
 from pytorch_pretrained_bert.file_utils import WEIGHTS_NAME, CONFIG_NAME
-from pytorch_pretrained_bert.blanc import BLANC
+from pytorch_pretrained_bert.blanc import BLANC, BertForQuestionAnswering
 from pytorch_pretrained_bert.optimization import BertAdam, warmup_linear
 from pytorch_pretrained_bert.tokenization import BasicTokenizer, BertTokenizer
 from pytorch_pretrained_bert.tokenization import _is_punctuation, _is_whitespace, _is_control
@@ -2069,6 +2069,52 @@ def main_finetuning(args):
             for key in sorted(result.keys()):
                 writer.write("%s = %s\n" % (key, str(result[key])))
 
+def main_model_testing(args):
+    device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
+    n_gpu = torch.cuda.device_count()
+    logger.info("device: {}, n_gpu: {}, 16-bits training: {}".format(
+        device, n_gpu, args.fp16))
+    model, pretrained_weights = BertForQuestionAnswering.from_pretrained(
+                args.model, cache_dir=PYTORCH_PRETRAINED_BERT_CACHE)
+    model.to(device)
+    if n_gpu > 1:
+        model = torch.nn.DataParallel(model)
+
+    with gzip.GzipFile(args.dev_file, 'r') as reader:
+            content = reader.read().decode('utf-8').strip().split('\n')[1:]
+            eval_dataset = [json.loads(line) for line in content]
+            
+    eval_examples = read_mrqa_examples(
+            args.dev_file, is_training=True, 
+            first_answer_only=True, 
+            do_lower_case=True,
+            remove_query_in_passage=False)
+    eval_features = convert_english_examples_to_features(
+                examples=eval_examples,
+                tokenizer=tokenizer,
+                max_seq_length=args.max_seq_length,
+                doc_stride=args.doc_stride,
+                max_query_length=args.max_query_length,
+                is_training=True,
+                first_answer_only=True)
+    logger.info("***** Dev *****")
+    logger.info("  Num orig examples = %d", len(eval_examples))
+    logger.info("  Num split examples = %d", len(eval_features))
+    logger.info("  Batch size = %d", args.eval_batch_size)
+    all_input_ids = torch.tensor([f.input_ids for f in eval_features], dtype=torch.long)
+    all_input_mask = torch.tensor([f.input_mask for f in eval_features], dtype=torch.long)
+    all_segment_ids = torch.tensor([f.segment_ids for f in eval_features], dtype=torch.long)
+    all_example_index = torch.arange(all_input_ids.size(0), dtype=torch.long)
+    eval_data = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_example_index)
+    eval_dataloader = DataLoader(eval_data, batch_size=args.eval_batch_size)
+
+    result, _, _ = \
+            evaluate(args, model, device, eval_dataset,
+                        eval_dataloader, eval_examples, eval_features)
+    #model.train()
+    result['batch_size'] = args.train_batch_size
+    logger.info(result)
+
 
 if __name__ == "__main__":
         parser = argparse.ArgumentParser()
@@ -2136,6 +2182,7 @@ if __name__ == "__main__":
         parser.add_argument('--enqueue_thread_num', type=int, default=4)
         parser.add_argument('--is_co_training', type=bool, default=False)
         parser.add_argument('--is_finetuning', type=bool, default=False)
+        parser.add_argument('--is_model_testing', type=bool, default=False)
         parser.add_argument('--debug', type=bool, default=False)
         parser.add_argument('--theta', type=float, default=0.8)
         parser.add_argument('--moving_loss_warmup_ratio', type=float, default=0.3)
@@ -2155,6 +2202,9 @@ if __name__ == "__main__":
         elif args.is_finetuning:
             logger.info('enter finetuning....')
             main_finetuning(args)
+        elif args.is_model_testing:
+            logger.info('enter model testing....')
+            main_model_testing(args)
         else:
             logger.info('enter main....')
             main(args)
