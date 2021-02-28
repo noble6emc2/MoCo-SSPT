@@ -2074,6 +2074,9 @@ def main_model_testing(args):
     n_gpu = torch.cuda.device_count()
     logger.info("device: {}, n_gpu: {}, 16-bits training: {}".format(
         device, n_gpu, args.fp16))
+    tokenizer = BertTokenizer.from_pretrained(
+        args.tokenizer, do_lower_case=args.do_lower_case)
+
     model, pretrained_weights = BertForQuestionAnswering.from_pretrained(
                 args.model, cache_dir=PYTORCH_PRETRAINED_BERT_CACHE)
     model.to(device)
