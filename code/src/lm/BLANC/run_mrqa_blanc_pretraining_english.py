@@ -32,7 +32,7 @@ from pytorch_pretrained_bert.file_utils import PYTORCH_PRETRAINED_BERT_CACHE
 from pytorch_pretrained_bert.file_utils import WEIGHTS_NAME, CONFIG_NAME
 from pytorch_pretrained_bert.blanc import BLANC, BertForQuestionAnswering
 from pytorch_pretrained_bert.optimization import BertAdam, warmup_linear
-from pytorch_pretrained_bert.tokenization import BasicTokenizer, BertTokenizer
+from pytorch_pretrained_bert.tokenization import BasicTokenizer, BertTokenizer, whitespace_tokenize
 from pytorch_pretrained_bert.tokenization import _is_punctuation, _is_whitespace, _is_control
 from mrqa_official_eval import exact_en_match_score, f1_en_score, metric_max_over_ground_truths
 
@@ -772,29 +772,80 @@ def _compute_softmax(scores):
     return probs
 
 
-def get_raw_scores(dataset, predictions, examples):
-    answers = {}
-    for example in dataset:
-        for qa in example['qas']:
-            answers[qa['qid']] = qa['answers']
+def make_qid_to_has_ans(dataset):
+    qid_to_has_ans = {}
+    for article in dataset:
+        for p in article['paragraphs']:
+            for qa in p['qas']:
+                qid_to_has_ans[qa['id']] = bool(qa['answers'])
+    return qid_to_has_ans
 
+
+def normalize_answer(s):
+
+    def remove_articles(text):
+        regex = re.compile(r'\b(a|an|the)\b', re.UNICODE)
+        return re.sub(regex, ' ', text)
+
+    def white_space_fix(text):
+        return ' '.join(text.split())
+
+    def remove_punc(text):
+        exclude = set(string.punctuation)
+        return ''.join(ch for ch in text if ch not in exclude)
+
+    def lower(text):
+        return text.lower()
+    return white_space_fix(remove_articles(remove_punc(lower(s))))
+
+
+def get_tokens(s):
+    if not s:
+        return []
+    return normalize_answer(s).split()
+
+
+def compute_exact(a_gold, a_pred):
+    return int(normalize_answer(a_gold) == normalize_answer(a_pred))
+
+
+def compute_f1(a_gold, a_pred):
+    gold_toks = get_tokens(a_gold)
+    pred_toks = get_tokens(a_pred)
+    common = collections.Counter(gold_toks) & collections.Counter(pred_toks)
+    num_same = sum(common.values())
+    if len(gold_toks) == 0 or len(pred_toks) == 0:
+        return [int(gold_toks == pred_toks)] * 3
+    if num_same == 0:
+        return [0, 0, 0]
+    precision = 1.0 * num_same / len(pred_toks)
+    recall = 1.0 * num_same / len(gold_toks)
+    f1 = (2 * precision * recall) / (precision + recall)
+    return [precision, recall, f1]
+
+
+def get_raw_scores(dataset, preds, examples):
     exact_scores = {}
     f1_scores = {}
     scores = {}
     precision_scores = {}
     recall_scores = {}
-    for qid, ground_truths in answers.items():
-        if qid not in predictions:
-            print('Missing prediction for %s' % qid)
-            continue
-        prediction = predictions[qid]['text']
-        exact_scores[qid] = metric_max_over_ground_truths(
-            exact_en_match_score, prediction, ground_truths)[0]
-        scores[qid] = metric_max_over_ground_truths(
-            f1_en_score, prediction, ground_truths)
-        f1_scores[qid] = scores[qid][0]
-        precision_scores[qid] = scores[qid][1]
-        recall_scores[qid] = scores[qid][2]
+    for article in dataset:
+        for p in article['paragraphs']:
+            for qa in p['qas']:
+                qid = qa['id']
+                gold_answers = [a['text'] for a in qa['answers'] if normalize_answer(a['text'])]
+                if not gold_answers:
+                    gold_answers = ['']
+                if qid not in preds:
+                    print('Missing prediction for %s' % qid)
+                    continue
+                a_pred = preds[qid]["text"]
+                exact_scores[qid] = max(compute_exact(a, a_pred) for a in gold_answers)
+                scores[qid] = [compute_f1(a, a_pred) for a in gold_answers]
+                f1_scores[qid] = max([s[2] for s in scores[qid]])
+                recall_scores[qid] = max([s[1] for s in scores[qid]])
+                precision_scores[qid] = max([s[0] for s in scores[qid]])
     
     def get_precision(sp, ep, sr, er):
         p_span = set(list(range(sp, ep + 1)))
@@ -813,40 +864,64 @@ def get_raw_scores(dataset, predictions, examples):
             return 0.0
         else:
             return 2.0 * p * r / (p + r)
+    
+    def select_g(sgs, egs):
+        n = len(sgs)
+        si = min([i for i in sgs])
+        ei = max([i for i in egs])
+        i2n = [0] * (ei + 1)
+        for i in range(si, ei + 1):
+            for j in range(n):
+                i2n[i] += 1 if sgs[j] <= i and i <= egs[j] else 0
+        m = max(i2n)
+        st = 0; et = 0
+        for i in range(si, ei + 1):
+            if i2n[i] == m:
+                st = i
+                break
+        for i in range(ei, si - 1, -1):
+            if i2n[i] == m:
+                et = i
+                break
+        return st, et
+
     span_f1 = {}
     span_exact = {}
     span_precision = {}
     span_recall = {}
     for example in examples:
         qid = example.qas_id
-        if qid not in predictions:
-            continue
-        sg = example.start_position
-        eg = example.end_position
+        sgs = example.start_positions
+        egs = example.end_positions
         
-        sf = predictions[qid]["start_index"]
-        ef = predictions[qid]["end_index"]
+        sf = preds[qid]["start_index"]
+        ef = preds[qid]["end_index"]
         if sf == None:
             sf = -1
         if ef == None:
             ef = -1
-        span_f1[qid] = get_f1(sf, ef, sg, eg)
-        if sf == sg and ef == eg:
-            span_exact[qid] = 1.0
+        
+        n_can = len(sgs)
+        span_exact[qid] = 0.0
+        for j in range(n_can):
+            if sf == sgs[j] and ef == egs[j]:
+                span_exact[qid] = 1.0
+                break
+        span_f1[qid] = max([get_f1(sf, ef, sgs[i], egs[i]) for i in range(n_can)])
+        span_precision[qid] = max([get_precision(sf, ef, sgs[i], egs[i]) for i in range(n_can)])
+        span_recall[qid] = max([get_recall(sf, ef, sgs[i], egs[i]) for i in range(n_can)])
+            
+    return exact_scores, f1_scores, precision_scores, recall_scores, span_exact, span_f1, span_precision, span_recall
+
+def apply_no_ans_threshold(scores, na_probs, qid_to_has_ans, na_prob_thresh):
+    new_scores = {}
+    for qid, s in scores.items():
+        pred_na = na_probs[qid] > na_prob_thresh
+        if pred_na:
+            new_scores[qid] = float(not qid_to_has_ans[qid])
         else:
-            span_exact[qid] = 0.0
-        span_precision[qid] = get_precision(sf, ef, sg, eg)
-        span_recall[qid] = get_recall(sf, ef, sg, eg)
-
-    return exact_scores, \
-            f1_scores, \
-            precision_scores, \
-            recall_scores, \
-            span_exact, \
-            span_f1, \
-            span_precision, \
-            span_recall
-
+            new_scores[qid] = s
+    return new_scores
 
 def make_eval_dict(exact_scores, f1_scores, precision={}, recall = {}, span_exact={}, span_f1={}, span_p={}, span_r={}, qid_list=None):
     if not qid_list:
@@ -875,6 +950,43 @@ def make_eval_dict(exact_scores, f1_scores, precision={}, recall = {}, span_exac
             ('span_recall', 100.0 * sum(span_r.values()) / total),
             ('total', total),
         ])
+
+
+def merge_eval(main_eval, new_eval, prefix):
+    for k in new_eval:
+        main_eval['%s_%s' % (prefix, k)] = new_eval[k]
+
+
+def find_best_thresh(preds, scores, na_probs, qid_to_has_ans):
+    num_no_ans = sum(1 for k in qid_to_has_ans if not qid_to_has_ans[k])
+    cur_score = num_no_ans
+    best_score = cur_score
+    best_thresh = 0.0
+    qid_list = sorted(na_probs, key=lambda k: na_probs[k])
+    for i, qid in enumerate(qid_list):
+        if qid not in scores:
+            continue
+        if qid_to_has_ans[qid]:
+            diff = scores[qid]
+        else:
+            if preds[qid]:
+                diff = -1
+            else:
+                diff = 0
+        cur_score += diff
+        if cur_score > best_score:
+            best_score = cur_score
+            best_thresh = na_probs[qid]
+    return 100.0 * best_score / len(scores), best_thresh
+
+
+def find_all_best_thresh(main_eval, preds, exact_raw, f1_raw, na_probs, qid_to_has_ans):
+    best_exact, exact_thresh = find_best_thresh(preds, exact_raw, na_probs, qid_to_has_ans)
+    best_f1, f1_thresh = find_best_thresh(preds, f1_raw, na_probs, qid_to_has_ans)
+    main_eval['best_exact'] = best_exact
+    main_eval['best_exact_thresh'] = exact_thresh
+    main_eval['best_f1'] = best_f1
+    main_eval['best_f1_thresh'] = f1_thresh
 
 
 def evaluate(args, model, device, eval_dataset, eval_dataloader,
@@ -2069,6 +2181,317 @@ def main_finetuning(args):
             for key in sorted(result.keys()):
                 writer.write("%s = %s\n" % (key, str(result[key])))
 
+
+class SquadExample(object):
+    """
+    A single training/test example for the Squad dataset.
+    For examples without an answer, the start and end position are -1.
+    """
+
+    def __init__(self,
+                 qas_id,
+                 question_text,
+                 doc_tokens,
+                 orig_answer_text=None,
+                 start_position=None,
+                 end_position=None,
+                 is_impossible=None,
+                 start_positions=None,
+                 end_positions=None,
+                 orig_answer_texts=None):
+        self.qas_id = qas_id
+        self.question_text = question_text
+        self.doc_tokens = doc_tokens
+        self.orig_answer_text = orig_answer_text
+        self.start_position = start_position
+        self.end_position = end_position
+        self.is_impossible = is_impossible
+    
+        self.start_positions = start_positions
+        self.end_positions = end_positions
+        self.orig_answer_texts = orig_answer_texts
+
+    def __str__(self):
+        return self.__repr__()
+
+    def __repr__(self):
+        s = ""
+        s += "qas_id: %s" % (self.qas_id)
+        s += ", question_text: %s" % (
+            self.question_text)
+        s += ", doc_tokens: [%s]" % (" ".join(self.doc_tokens))
+        if self.start_position:
+            s += ", start_position: %d" % (self.start_position)
+        if self.end_position:
+            s += ", end_position: %d" % (self.end_position)
+        if self.is_impossible:
+            s += ", is_impossible: %r" % (self.is_impossible)
+        return s
+
+
+def read_squad_examples(input_file, is_training, version_2_with_negative):
+    """Read a SQuAD json file into a list of SquadExample."""
+    with open(input_file, "r", encoding='utf-8') as reader:
+        input_data = json.load(reader)["data"]
+
+    def is_whitespace(c):
+        if c == " " or c == "\t" or c == "\r" or c == "\n" or ord(c) == 0x202F:
+            return True
+        return False
+
+    examples = []
+    for entry in input_data:
+        for paragraph in entry["paragraphs"]:
+            paragraph_text = paragraph["context"]
+            doc_tokens = []
+            char_to_word_offset = []
+            prev_is_whitespace = True
+            for c in paragraph_text:
+                if is_whitespace(c):
+                    prev_is_whitespace = True
+                else:
+                    if prev_is_whitespace:
+                        doc_tokens.append(c)
+                    else:
+                        doc_tokens[-1] += c
+                    prev_is_whitespace = False
+                char_to_word_offset.append(len(doc_tokens) - 1)
+
+            for qa in paragraph["qas"]:
+                qas_id = qa["id"]
+                question_text = qa["question"]
+                start_position = None
+                end_position = None
+                orig_answer_text = None
+                is_impossible = False
+                start_positions = []
+                end_positions = []
+                orig_answer_texts = []
+                if is_training:
+                    if version_2_with_negative:
+                        is_impossible = qa["is_impossible"]
+                    if (len(qa["answers"]) != 1) and (not is_impossible):
+                        raise ValueError(
+                            "For training, each question should have exactly 1 answer.")
+                    if not is_impossible:
+                        answer = qa["answers"][0]
+                        orig_answer_text = answer["text"]
+                        answer_offset = answer["answer_start"]
+                        answer_length = len(orig_answer_text)
+                        start_position = char_to_word_offset[answer_offset]
+                        end_position = char_to_word_offset[answer_offset + answer_length - 1]
+                        actual_text = " ".join(doc_tokens[start_position:(end_position + 1)])
+                        cleaned_answer_text = " ".join(
+                            whitespace_tokenize(orig_answer_text))
+                        if actual_text.find(cleaned_answer_text) == -1:
+                            logger.warning("Could not find answer: '%s' vs. '%s'",
+                                           actual_text, cleaned_answer_text)
+                            continue
+                    else:
+                        start_position = -1
+                        end_position = -1
+                        orig_answer_text = ""
+                else:
+                    if version_2_with_negative:
+                        is_impossible = qa["is_impossible"]
+                    if not is_impossible:
+                        answers = qa["answers"]
+                        for answer in answers:
+                            orig_answer_text = answer["text"]
+                            answer_offset = answer["answer_start"]
+                            answer_length = len(orig_answer_text)
+                            start_position = char_to_word_offset[answer_offset]
+                            end_position = char_to_word_offset[answer_offset + answer_length - 1]
+                            actual_text = " ".join(doc_tokens[start_position:(end_position + 1)])
+                            cleaned_answer_text = " ".join(
+                                whitespace_tokenize(orig_answer_text))
+                            if actual_text.find(cleaned_answer_text) == -1:
+                                logger.warning("Could not find answer: '%s' vs. '%s'",
+                                               actual_text, cleaned_answer_text)
+                                continue
+                            start_positions.append(start_position)
+                            end_positions.append(end_position)
+                            orig_answer_texts.append(orig_answer_text)
+
+                    else:
+                        start_position = -1
+                        end_position = -1
+                        orig_answer_text = ""
+                        start_positions.append(start_position)
+                        end_positions.append(end_position)
+                        orig_answer_texts.append(orig_answer_text)
+
+                example = SquadExample(
+                    qas_id=qas_id,
+                    question_text=question_text,
+                    doc_tokens=doc_tokens,
+                    orig_answer_text=orig_answer_text,
+                    start_position=start_position,
+                    end_position=end_position,
+                    is_impossible=is_impossible,
+                    start_positions=start_positions,
+                    end_positions=end_positions,
+                    orig_answer_texts=orig_answer_texts)
+                examples.append(example)
+    return examples
+
+
+def convert_squad_examples_to_features(examples, tokenizer, max_seq_length,
+                                 doc_stride, max_query_length, is_training):
+    """Loads a data file into a list of `InputBatch`s."""
+
+    unique_id = 1000000000
+
+    features = []
+    for (example_index, example) in enumerate(examples):
+        query_tokens = tokenizer.tokenize(example.question_text)
+
+        if len(query_tokens) > max_query_length:
+            query_tokens = query_tokens[0:max_query_length]
+
+        tok_to_orig_index = []
+        orig_to_tok_index = []
+        all_doc_tokens = []
+        for (i, token) in enumerate(example.doc_tokens):
+            orig_to_tok_index.append(len(all_doc_tokens))
+            sub_tokens = tokenizer.tokenize(token)
+            for sub_token in sub_tokens:
+                tok_to_orig_index.append(i)
+                all_doc_tokens.append(sub_token)
+
+        tok_start_position = None
+        tok_end_position = None
+        if example.is_impossible:
+            tok_start_position = -1
+            tok_end_position = -1
+        
+        if not example.is_impossible:
+            tok_start_position = orig_to_tok_index[example.start_position]
+            if example.end_position < len(example.doc_tokens) - 1:
+                tok_end_position = orig_to_tok_index[example.end_position + 1] - 1
+            else:
+                tok_end_position = len(all_doc_tokens) - 1
+            (tok_start_position, tok_end_position) = _improve_answer_span(
+                all_doc_tokens, tok_start_position, tok_end_position, tokenizer,
+                example.orig_answer_text)
+
+        # The -3 accounts for [CLS], [SEP] and [SEP]
+        max_tokens_for_doc = max_seq_length - len(query_tokens) - 3
+
+        _DocSpan = collections.namedtuple(
+            "DocSpan", ["start", "length"])
+        doc_spans = []
+        start_offset = 0
+        while start_offset < len(all_doc_tokens):
+            length = len(all_doc_tokens) - start_offset
+            if length > max_tokens_for_doc:
+                length = max_tokens_for_doc
+            doc_spans.append(_DocSpan(start=start_offset, length=length))
+            if start_offset + length == len(all_doc_tokens):
+                break
+            start_offset += min(length, doc_stride)
+        
+        for (doc_span_index, doc_span) in enumerate(doc_spans):
+            tokens = []
+            token_to_orig_map = {}
+            token_is_max_context = {}
+            segment_ids = []
+            tokens.append("[CLS]")
+            segment_ids.append(0)
+            for token in query_tokens:
+                tokens.append(token)
+                segment_ids.append(0)
+            tokens.append("[SEP]")
+            segment_ids.append(0)
+
+            for i in range(doc_span.length):
+                split_token_index = doc_span.start + i
+                token_to_orig_map[len(tokens)] = tok_to_orig_index[split_token_index]
+
+                is_max_context = _check_is_max_context(doc_spans, doc_span_index,
+                                                       split_token_index)
+                token_is_max_context[len(tokens)] = is_max_context
+                tokens.append(all_doc_tokens[split_token_index])
+                segment_ids.append(1)
+            tokens.append("[SEP]")
+            segment_ids.append(1)
+
+            input_ids = tokenizer.convert_tokens_to_ids(tokens)
+            input_mask = [1] * len(input_ids)
+
+            while len(input_ids) < max_seq_length:
+                input_ids.append(0)
+                input_mask.append(0)
+                segment_ids.append(0)
+
+            assert len(input_ids) == max_seq_length
+            assert len(input_mask) == max_seq_length
+            assert len(segment_ids) == max_seq_length
+
+            start_position = None
+            end_position = None
+            if not example.is_impossible:
+                doc_start = doc_span.start
+                doc_end = doc_span.start + doc_span.length - 1
+                out_of_span = False
+                if not (tok_start_position >= doc_start and
+                        tok_end_position <= doc_end):
+                    out_of_span = True
+                if out_of_span:
+                    start_position = 0
+                    end_position = 0
+                else:
+                    doc_offset = len(query_tokens) + 2
+                    start_position = tok_start_position - doc_start + doc_offset
+                    end_position = tok_end_position - doc_start + doc_offset
+            if example.is_impossible:
+                start_position = 0
+                end_position = 0
+                continue
+            if example_index < 0:
+                logger.info("*** Example ***")
+                logger.info("unique_id: %s" % (unique_id))
+                logger.info("example_index: %s" % (example_index))
+                logger.info("doc_span_index: %s" % (doc_span_index))
+                logger.info("tokens: %s" % " ".join(tokens))
+                logger.info("token_to_orig_map: %s" % " ".join([
+                    "%d:%d" % (x, y) for (x, y) in token_to_orig_map.items()]))
+                logger.info("token_is_max_context: %s" % " ".join([
+                    "%d:%s" % (x, y) for (x, y) in token_is_max_context.items()
+                ]))
+                logger.info("input_ids: %s" % " ".join([str(x) for x in input_ids]))
+                logger.info(
+                    "input_mask: %s" % " ".join([str(x) for x in input_mask]))
+                logger.info(
+                    "segment_ids: %s" % " ".join([str(x) for x in segment_ids]))
+                if is_training and example.is_impossible:
+                    logger.info("impossible example")
+                if is_training and not example.is_impossible:
+                    answer_text = " ".join(tokens[start_position:(end_position + 1)])
+                    logger.info("start_position: %d" % (start_position))
+                    logger.info("end_position: %d" % (end_position))
+                    logger.info(
+                        "answer: %s" % (answer_text))
+
+            features.append(
+                InputFeatures(
+                    unique_id=unique_id,
+                    example_index=example_index,
+                    doc_span_index=doc_span_index,
+                    tokens=tokens,
+                    token_to_orig_map=token_to_orig_map,
+                    token_is_max_context=token_is_max_context,
+                    input_ids=input_ids,
+                    input_mask=input_mask,
+                    segment_ids=segment_ids,
+                    start_position=start_position,
+                    end_position=end_position,
+                    is_impossible=example.is_impossible))
+            unique_id += 1
+
+    return features
+
+
 def main_model_testing(args):
     device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
     n_gpu = torch.cuda.device_count()
@@ -2087,19 +2510,18 @@ def main_model_testing(args):
             content = reader.read().decode('utf-8').strip().split('\n')[1:]
             eval_dataset = [json.loads(line) for line in content]
             
-    eval_examples = read_mrqa_examples(
-            args.dev_file, is_training=True, 
-            first_answer_only=True, 
-            do_lower_case=True,
-            remove_query_in_passage=False)
-    eval_features = convert_english_examples_to_features(
-                examples=eval_examples,
-                tokenizer=tokenizer,
-                max_seq_length=args.max_seq_length,
-                doc_stride=args.doc_stride,
-                max_query_length=args.max_query_length,
-                is_training=True,
-                first_answer_only=True)
+    eval_examples = read_squad_examples(
+            input_file=args.dev_file, is_training=False,
+            version_2_with_negative=args.version_2_with_negative
+            )
+    eval_features = convert_squad_examples_to_features(
+            examples=eval_examples,
+            tokenizer=tokenizer,
+            max_seq_length=args.max_seq_length,
+            doc_stride=args.doc_stride,
+            max_query_length=args.max_query_length,
+            is_training=False
+            )
     logger.info("***** Dev *****")
     logger.info("  Num orig examples = %d", len(eval_examples))
     logger.info("  Num split examples = %d", len(eval_features))
@@ -2186,6 +2608,7 @@ if __name__ == "__main__":
         parser.add_argument('--is_co_training', type=bool, default=False)
         parser.add_argument('--is_finetuning', type=bool, default=False)
         parser.add_argument('--is_model_testing', type=bool, default=False)
+        parser.add_argument('--version_2_with_negative', type=bool, default=False)
         parser.add_argument('--debug', type=bool, default=False)
         parser.add_argument('--theta', type=float, default=0.8)
         parser.add_argument('--moving_loss_warmup_ratio', type=float, default=0.3)
