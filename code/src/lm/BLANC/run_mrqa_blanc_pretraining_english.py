@@ -17,6 +17,7 @@ import sys
 import gzip
 import six
 import unicodedata
+import string
 import re
 import math
 from torch import nn
