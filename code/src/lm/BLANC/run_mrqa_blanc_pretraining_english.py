@@ -1076,10 +1076,10 @@ def main(args):
             if args.model_type == "BLANC":
                 model, pretrained_weights = BLANC.from_pretrained(
                     args.model, cache_dir=PYTORCH_PRETRAINED_BERT_CACHE)
-            elif args.model_type == "BertForQuestionAnswering":
+            elif args.model_type == "BertForQA":
                 model, pretrained_weights = BertForQuestionAnswering.from_pretrained(
                     args.model, cache_dir=PYTORCH_PRETRAINED_BERT_CACHE)
-                    
+
             if args.fp16:
                 model.half()
             model.to(device)
