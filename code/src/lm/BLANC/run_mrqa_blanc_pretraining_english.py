@@ -40,53 +40,12 @@ from mrqa_official_eval import exact_en_match_score, f1_en_score, metric_max_ove
 PRED_FILE = "predictions.json"
 EVAL_FILE = "eval_results.txt"
 TEST_FILE = "test_results.txt"
+MODEL_TYPES = ["BLANC", "BertForQA"]
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
                     datefmt='%m/%d/%Y %H:%M:%S',
                     level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-def convert_to_unicode(text):
-    """Converts `text` to Unicode (if it's not already), assuming utf-8 input."""
-    if six.PY3:
-        if isinstance(text, str):
-            return text
-        elif isinstance(text, bytes):
-            return text.decode("utf-8", "ignore")
-        else:
-            raise ValueError("Unsupported string type: %s" % (type(text)))
-    elif six.PY2:
-        if isinstance(text, str):
-            return text.decode("utf-8", "ignore")
-        elif isinstance(text, unicode):
-            return text
-        else:
-            raise ValueError("Unsupported string type: %s" % (type(text)))
-    else:
-        raise ValueError("Not running on Python2 or Python 3?")
-
-def tokenize_chinese(text, masking, do_lower_case):
-    temp_x = ""
-    text = convert_to_unicode(text)
-    idx = 0
-    if do_lower_case:
-        text = text.lower()
-
-    while(idx < len(text)):
-        c = text[idx]
-        if masking is not None and text[idx: idx + len(masking)] == masking.lower():
-            temp_x += masking
-            idx += len(masking)
-            continue
-        elif BasicTokenizer._is_chinese_char(ord(c)) or _is_punctuation(c) or \
-                _is_whitespace(c) or _is_control(c):
-            temp_x += " " + c + " "
-        else:
-            temp_x += c
-        
-        idx += 1
-
-    return temp_x.split()
 
 
 class MRQAExample(object):
@@ -1073,46 +1032,6 @@ def main(args):
     tokenizer = BertTokenizer.from_pretrained(
         args.tokenizer, do_lower_case=args.do_lower_case)
 
-    if args.do_eval and (args.do_train or (not args.eval_test)):
-        with gzip.GzipFile(args.dev_file, 'r') as reader:
-            content = reader.read().decode('utf-8').strip().split('\n')[1:]
-            eval_dataset = [json.loads(line) for line in content]
-        '''
-        eval_examples = read_mrqa_examples(
-            input_file=args.dev_file, is_training=False)
-        eval_features = convert_examples_to_features(
-            examples=eval_examples,
-            tokenizer=tokenizer,
-            max_seq_length=args.max_seq_length,
-            doc_stride=args.doc_stride,
-            max_query_length=args.max_query_length,
-            is_training=False)
-        '''
-        eval_examples = read_chinese_examples(
-                line_list=content, is_training=True, 
-                first_answer_only=True, 
-                replace_mask="[unused1]",
-                do_lower_case=True,
-                remove_query_in_passage=True)
-        eval_features = convert_chinese_examples_to_features(
-                    examples=eval_examples,
-                    tokenizer=tokenizer,
-                    max_seq_length=args.max_seq_length,
-                    doc_stride=args.doc_stride,
-                    max_query_length=args.max_query_length,
-                    is_training=True,
-                    first_answer_only=True)
-        logger.info("***** Dev *****")
-        logger.info("  Num orig examples = %d", len(eval_examples))
-        logger.info("  Num split examples = %d", len(eval_features))
-        logger.info("  Batch size = %d", args.eval_batch_size)
-        all_input_ids = torch.tensor([f.input_ids for f in eval_features], dtype=torch.long)
-        all_input_mask = torch.tensor([f.input_mask for f in eval_features], dtype=torch.long)
-        all_segment_ids = torch.tensor([f.segment_ids for f in eval_features], dtype=torch.long)
-        all_example_index = torch.arange(all_input_ids.size(0), dtype=torch.long)
-        eval_data = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_example_index)
-        eval_dataloader = DataLoader(eval_data, batch_size=args.eval_batch_size)
-
     if args.do_train:
         '''
         train_examples = read_mrqa_examples(
@@ -1153,8 +1072,14 @@ def main(args):
         best_result = None
         lrs = [args.learning_rate] if args.learning_rate else [1e-6, 2e-6, 3e-6, 5e-6, 1e-5, 2e-5, 3e-5, 5e-5]
         for lr in lrs:
-            model, pretrained_weights = BLANC.from_pretrained(
-                args.model, cache_dir=PYTORCH_PRETRAINED_BERT_CACHE)
+            assert args.model_type in MODEL_TYPES
+            if args.model_type == "BLANC":
+                model, pretrained_weights = BLANC.from_pretrained(
+                    args.model, cache_dir=PYTORCH_PRETRAINED_BERT_CACHE)
+            elif args.model_type == "BertForQuestionAnswering":
+                model, pretrained_weights = BertForQuestionAnswering.from_pretrained(
+                    args.model, cache_dir=PYTORCH_PRETRAINED_BERT_CACHE)
+                    
             if args.fp16:
                 model.half()
             model.to(device)
@@ -1277,42 +1202,7 @@ def main(args):
                                     for key in sorted(best_result.keys()):
                                         writer.write("%s = %s\n" % (key, str(best_result[key])))
 
-    if args.do_eval:
-        if args.eval_test:
-            with gzip.GzipFile(args.test_file, 'r') as reader:
-                content = reader.read().decode('utf-8').strip().split('\n')[1:]
-                eval_dataset = [json.loads(line) for line in content]
-            eval_examples = read_mrqa_examples(
-                input_file=args.test_file, is_training=False)
-            eval_features = convert_examples_to_features(
-                examples=eval_examples,
-                tokenizer=tokenizer,
-                max_seq_length=args.max_seq_length,
-                doc_stride=args.doc_stride,
-                max_query_length=args.max_query_length,
-                is_training=False)
-            logger.info("***** Test *****")
-            logger.info("  Num orig examples = %d", len(eval_examples))
-            logger.info("  Num split examples = %d", len(eval_features))
-            logger.info("  Batch size = %d", args.eval_batch_size)
-            all_input_ids = torch.tensor([f.input_ids for f in eval_features], dtype=torch.long)
-            all_input_mask = torch.tensor([f.input_mask for f in eval_features], dtype=torch.long)
-            all_segment_ids = torch.tensor([f.segment_ids for f in eval_features], dtype=torch.long)
-            all_example_index = torch.arange(all_input_ids.size(0), dtype=torch.long)
-            eval_data = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_example_index)
-            eval_dataloader = DataLoader(eval_data, batch_size=args.eval_batch_size)
-        model, pretrained_weights = BLANC.from_pretrained(args.output_dir)
-        if args.fp16:
-            model.half()
-        model.to(device)
-        result, preds, nbest_preds = \
-            evaluate(args, model, device, eval_dataset,
-                     eval_dataloader, eval_examples, eval_features)
-        with open(os.path.join(args.output_dir, PRED_FILE), "w") as writer:
-            writer.write(json.dumps(preds, indent=4) + "\n")
-        with open(os.path.join(args.output_dir, TEST_FILE), "w") as writer:
-            for key in sorted(result.keys()):
-                writer.write("%s = %s\n" % (key, str(result[key])))
+
 
 def main_cotraining(args):
     from torch.utils.tensorboard import SummaryWriter
@@ -1361,79 +1251,12 @@ def main_cotraining(args):
         logger.addHandler(logging.FileHandler(os.path.join(args.output_dir_a, "train.log"), 'w'))
     else:
         logger.addHandler(logging.FileHandler(os.path.join(args.output_dir_a, "eval.log"), 'w'))
+    
     logger.info(args)
-
     tokenizer = BertTokenizer.from_pretrained(
         args.tokenizer, do_lower_case=args.do_lower_case)
 
-    if args.do_eval and (args.do_train or (not args.eval_test)):
-        with gzip.GzipFile(args.dev_file, 'r') as reader:
-            content = reader.read().decode('utf-8').strip().split('\n')[1:]
-            eval_dataset = [json.loads(line) for line in content]
-        '''
-        eval_examples = read_mrqa_examples(
-            input_file=args.dev_file, is_training=False)
-        eval_features = convert_examples_to_features(
-            examples=eval_examples,
-            tokenizer=tokenizer,
-            max_seq_length=args.max_seq_length,
-            doc_stride=args.doc_stride,
-            max_query_length=args.max_query_length,
-            is_training=False)
-        '''
-        eval_examples = read_chinese_examples(
-                line_list=content, is_training=True, 
-                first_answer_only=True, 
-                replace_mask="[unused1]",
-                do_lower_case=True,
-                remove_query_in_passage=True)
-        eval_features = convert_chinese_examples_to_features(
-                    examples=eval_examples,
-                    tokenizer=tokenizer,
-                    max_seq_length=args.max_seq_length,
-                    doc_stride=args.doc_stride,
-                    max_query_length=args.max_query_length,
-                    is_training=True,
-                    first_answer_only=True)
-        logger.info("***** Dev *****")
-        logger.info("  Num orig examples = %d", len(eval_examples))
-        logger.info("  Num split examples = %d", len(eval_features))
-        logger.info("  Batch size = %d", args.eval_batch_size)
-        all_input_ids = torch.tensor([f.input_ids for f in eval_features], dtype=torch.long)
-        all_input_mask = torch.tensor([f.input_mask for f in eval_features], dtype=torch.long)
-        all_segment_ids = torch.tensor([f.segment_ids for f in eval_features], dtype=torch.long)
-        all_example_index = torch.arange(all_input_ids.size(0), dtype=torch.long)
-        eval_data = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_example_index)
-        eval_dataloader = DataLoader(eval_data, batch_size=args.eval_batch_size)
-
     if args.do_train:
-        '''
-        train_examples = read_mrqa_examples(
-            input_file=args.train_file, is_training=True)
-        train_features = convert_examples_to_features(
-                examples=train_examples,
-                tokenizer=tokenizer,
-                max_seq_length=args.max_seq_length,
-                doc_stride=args.doc_stride,
-                max_query_length=args.max_query_length,
-                is_training=True)
-
-        if args.train_mode == 'sorted' or args.train_mode == 'random_sorted':
-            train_features = sorted(train_features, key=lambda f: np.sum(f.input_mask))
-        else:
-            random.shuffle(train_features)
-
-        all_input_ids = torch.tensor([f.input_ids for f in train_features], dtype=torch.long)
-        all_input_mask = torch.tensor([f.input_mask for f in train_features], dtype=torch.long)
-        all_segment_ids = torch.tensor([f.segment_ids for f in train_features], dtype=torch.long)
-        all_start_positions = torch.tensor([f.start_position for f in train_features], dtype=torch.long)
-        all_end_positions = torch.tensor([f.end_position for f in train_features], dtype=torch.long)
-        train_data = TensorDataset(all_input_ids, all_input_mask, all_segment_ids,
-                                   all_start_positions, all_end_positions)
-        train_dataloader = DataLoader(train_data, batch_size=args.train_batch_size)
-        train_batches = [batch for batch in train_dataloader]
-        '''
-
         num_train_optimization_steps = \
             args.num_iteration // args.gradient_accumulation_steps * args.num_train_epochs
         logger.info("***** Train *****")
@@ -1500,7 +1323,9 @@ def main_cotraining(args):
 
             return optimizer_a, optimizer_b
 
+
         for lr in lrs:
+            assert args.model_type == "BLANC"
             model_a, pretrained_weights_a = BLANC.from_pretrained(
                 args.model, cache_dir=PYTORCH_PRETRAINED_BERT_CACHE)
             model_b, pretrained_weights_b = BLANC.from_pretrained(
@@ -1775,55 +1600,6 @@ def main_cotraining(args):
                                     for key in sorted(result_b.keys()):
                                         writer.write("%s = %s\n" % (key, str(result_b[key])))
 
-    if args.do_eval:
-        if args.eval_test:
-            with gzip.GzipFile(args.test_file, 'r') as reader:
-                content = reader.read().decode('utf-8').strip().split('\n')[1:]
-                eval_dataset = [json.loads(line) for line in content]
-            eval_examples = read_mrqa_examples(
-                input_file=args.test_file, is_training=False)
-            eval_features = convert_examples_to_features(
-                examples=eval_examples,
-                tokenizer=tokenizer,
-                max_seq_length=args.max_seq_length,
-                doc_stride=args.doc_stride,
-                max_query_length=args.max_query_length,
-                is_training=False)
-            logger.info("***** Test *****")
-            logger.info("  Num orig examples = %d", len(eval_examples))
-            logger.info("  Num split examples = %d", len(eval_features))
-            logger.info("  Batch size = %d", args.eval_batch_size)
-            all_input_ids = torch.tensor([f.input_ids for f in eval_features], dtype=torch.long)
-            all_input_mask = torch.tensor([f.input_mask for f in eval_features], dtype=torch.long)
-            all_segment_ids = torch.tensor([f.segment_ids for f in eval_features], dtype=torch.long)
-            all_example_index = torch.arange(all_input_ids.size(0), dtype=torch.long)
-            eval_data = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_example_index)
-            eval_dataloader = DataLoader(eval_data, batch_size=args.eval_batch_size)
-        model_a, pretrained_weights_a = BLANC.from_pretrained(args.output_dir_a)
-        model_b, pretrained_weights_b = BLANC.from_pretrained(args.output_dir_b)
-        if args.fp16:
-            model_a.half()
-            model_b.half()
-        model_a.to(device)
-        model_b.to(device)
-        result_a, preds_a, nbest_preds_a = \
-            evaluate(args, model_a, device, eval_dataset,
-                     eval_dataloader, eval_examples, eval_features)
-        result_b, preds_b, nbest_preds_b = \
-            evaluate(args, model_b, device, eval_dataset,
-                     eval_dataloader, eval_examples, eval_features)
-        with open(os.path.join(args.output_dir_a, PRED_FILE), "w") as writer:
-            writer.write(json.dumps(preds_a, indent=4) + "\n")
-        with open(os.path.join(args.output_dir_a, TEST_FILE), "w") as writer:
-            for key in sorted(result_a.keys()):
-                writer.write("%s = %s\n" % (key, str(result_a[key])))
-
-        with open(os.path.join(args.output_dir_b, PRED_FILE), "w") as writer:
-            writer.write(json.dumps(preds_b, indent=4) + "\n")
-        with open(os.path.join(args.output_dir_b, TEST_FILE), "w") as writer:
-            for key in sorted(result_b.keys()):
-                writer.write("%s = %s\n" % (key, str(result_b[key])))
-
 
 def read_mrqa_examples(input_file, is_training, 
     first_answer_only, do_lower_case,
@@ -2027,6 +1803,7 @@ def main_finetuning(args):
         best_result = None
         lrs = [args.learning_rate] if args.learning_rate else [1e-6, 2e-6, 3e-6, 5e-6, 1e-5, 2e-5, 3e-5, 5e-5]
         for lr in lrs:
+            assert args.model_type in MODEL_TYPES
             model, pretrained_weights = BLANC.from_pretrained(
                 args.model, cache_dir=PYTORCH_PRETRAINED_BERT_CACHE)
             if args.fp16:
@@ -2147,42 +1924,6 @@ def main_finetuning(args):
                                     for key in sorted(best_result.keys()):
                                         writer.write("%s = %s\n" % (key, str(best_result[key])))
 
-    if args.do_eval:
-        if args.eval_test:
-            with gzip.GzipFile(args.test_file, 'r') as reader:
-                content = reader.read().decode('utf-8').strip().split('\n')[1:]
-                eval_dataset = [json.loads(line) for line in content]
-            eval_examples = read_mrqa_examples(
-                input_file=args.test_file, is_training=False)
-            eval_features = convert_examples_to_features(
-                examples=eval_examples,
-                tokenizer=tokenizer,
-                max_seq_length=args.max_seq_length,
-                doc_stride=args.doc_stride,
-                max_query_length=args.max_query_length,
-                is_training=False)
-            logger.info("***** Test *****")
-            logger.info("  Num orig examples = %d", len(eval_examples))
-            logger.info("  Num split examples = %d", len(eval_features))
-            logger.info("  Batch size = %d", args.eval_batch_size)
-            all_input_ids = torch.tensor([f.input_ids for f in eval_features], dtype=torch.long)
-            all_input_mask = torch.tensor([f.input_mask for f in eval_features], dtype=torch.long)
-            all_segment_ids = torch.tensor([f.segment_ids for f in eval_features], dtype=torch.long)
-            all_example_index = torch.arange(all_input_ids.size(0), dtype=torch.long)
-            eval_data = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_example_index)
-            eval_dataloader = DataLoader(eval_data, batch_size=args.eval_batch_size)
-        model, pretrained_weights = BLANC.from_pretrained(args.output_dir)
-        if args.fp16:
-            model.half()
-        model.to(device)
-        result, preds, nbest_preds = \
-            evaluate(args, model, device, eval_dataset,
-                     eval_dataloader, eval_examples, eval_features)
-        with open(os.path.join(args.output_dir, PRED_FILE), "w") as writer:
-            writer.write(json.dumps(preds, indent=4) + "\n")
-        with open(os.path.join(args.output_dir, TEST_FILE), "w") as writer:
-            for key in sorted(result.keys()):
-                writer.write("%s = %s\n" % (key, str(result[key])))
 
 
 class SquadExample(object):
@@ -2503,6 +2244,7 @@ def main_model_testing(args):
     tokenizer = BertTokenizer.from_pretrained(
         args.tokenizer, do_lower_case=args.do_lower_case)
 
+    assert args.model_type == "BertForQA"
     model, pretrained_weights = BertForQuestionAnswering.from_pretrained(
                 args.model, cache_dir=PYTORCH_PRETRAINED_BERT_CACHE)
     model.to(device)
@@ -2551,6 +2293,7 @@ def main_model_testing(args):
 if __name__ == "__main__":
         parser = argparse.ArgumentParser()
         parser.add_argument("--model", default="bert-base-chinese", type=str, required=True)
+        parser.add_argument("--model_type", choices=MODEL_TYPES, type=str, required=True)
         parser.add_argument("--tokenizer", default="bert-base-chinese", type=str, required=True)
         parser.add_argument("--output_dir", default=None, type=str, required=True,
                             help="The output directory where the model checkpoints and predictions will be written.")

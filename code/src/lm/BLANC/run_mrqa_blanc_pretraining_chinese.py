@@ -30,7 +30,7 @@ import datetime
 from torch.utils.data import DataLoader, TensorDataset
 from pytorch_pretrained_bert.file_utils import PYTORCH_PRETRAINED_BERT_CACHE
 from pytorch_pretrained_bert.file_utils import WEIGHTS_NAME, CONFIG_NAME
-from pytorch_pretrained_bert.blanc import BLANC
+from pytorch_pretrained_bert.blanc import BLANC, BertForQuestionAnswering
 from pytorch_pretrained_bert.optimization import BertAdam, warmup_linear
 from pytorch_pretrained_bert.tokenization import BasicTokenizer, BertTokenizer
 from pytorch_pretrained_bert.tokenization import _is_punctuation, _is_whitespace, _is_control
@@ -39,6 +39,7 @@ from mrqa_official_eval import exact_match_score, f1_score, metric_max_over_grou
 PRED_FILE = "predictions.json"
 EVAL_FILE = "eval_results.txt"
 TEST_FILE = "test_results.txt"
+MODEL_TYPES = ["BLANC", "BertForQA"]
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
                     datefmt='%m/%d/%Y %H:%M:%S',
@@ -1041,8 +1042,14 @@ def main(args):
         best_result = None
         lrs = [args.learning_rate] if args.learning_rate else [1e-6, 2e-6, 3e-6, 5e-6, 1e-5, 2e-5, 3e-5, 5e-5]
         for lr in lrs:
-            model, pretrained_weights = BLANC.from_pretrained(
-                args.model, cache_dir=PYTORCH_PRETRAINED_BERT_CACHE)
+            assert args.model_type in MODEL_TYPES
+            if args.model_type == "BLANC":
+                model, pretrained_weights = BLANC.from_pretrained(
+                    args.model, cache_dir=PYTORCH_PRETRAINED_BERT_CACHE)
+            elif args.model_type == "BertForQuestionAnswering":
+                model, pretrained_weights = BertForQuestionAnswering.from_pretrained(
+                    args.model, cache_dir=PYTORCH_PRETRAINED_BERT_CACHE)
+
             if args.fp16:
                 model.half()
             model.to(device)
@@ -2168,6 +2175,7 @@ def main_finetuning(args):
 if __name__ == "__main__":
         parser = argparse.ArgumentParser()
         parser.add_argument("--model", default="bert-base-chinese", type=str, required=True)
+        parser.add_argument("--model_type", choices=MODEL_TYPES, type=str, required=True)
         parser.add_argument("--tokenizer", default="bert-base-chinese", type=str, required=True)
         parser.add_argument("--output_dir", default=None, type=str, required=True,
                             help="The output directory where the model checkpoints and predictions will be written.")
