@@ -5,7 +5,9 @@ import json
 import re
 import gzip
 import numpy as np
-
+import six
+from pytorch_pretrained_bert.tokenization import BasicTokenizer, BertTokenizer
+from pytorch_pretrained_bert.tokenization import _is_punctuation, _is_whitespace, _is_control
 
 class SquadExample(object):
     """
@@ -202,7 +204,7 @@ class BaseProcessor(object):
 
         return cur_span_index == best_span_index
 
-    def _convert_en_examples_to_features(self, examples, tokenizer, max_seq_length,
+    def _convert_examples_to_features(self, examples, tokenizer, max_seq_length,
                                 doc_stride, max_query_length, is_training,
                                 first_answer_only):
         """Loads a data file into a list of `InputBatch`s."""
@@ -391,9 +393,180 @@ class BaseProcessor(object):
                 unique_id += 1
 
         return features
+
+    def tokenize_chinese(self, text, masking, do_lower_case):
+        temp_x = ""
+        text = convert_to_unicode(text)
+        idx = 0
+        if do_lower_case:
+            text = text.lower()
+
+        while(idx < len(text)):
+            c = text[idx]
+            if masking is not None and text[idx: idx + len(masking)] == masking.lower():
+                temp_x += masking
+                idx += len(masking)
+                continue
+            elif BasicTokenizer._is_chinese_char(ord(c)) or _is_punctuation(c) or \
+                    _is_whitespace(c) or _is_control(c):
+                temp_x += " " + c + " "
+            else:
+                temp_x += c
+            
+            idx += 1
+
+        return temp_x.split()
+
+    def convert_to_unicode(self, text):
+        """Converts `text` to Unicode (if it's not already), assuming utf-8 input."""
+        if six.PY3:
+            if isinstance(text, str):
+                return text
+            elif isinstance(text, bytes):
+                return text.decode("utf-8", "ignore")
+            else:
+                raise ValueError("Unsupported string type: %s" % (type(text)))
+        elif six.PY2:
+            if isinstance(text, str):
+                return text.decode("utf-8", "ignore")
+            elif isinstance(text, unicode):
+                return text
+            else:
+                raise ValueError("Unsupported string type: %s" % (type(text)))
+        else:
+            raise ValueError("Not running on Python2 or Python 3?")
     
 
 class PretrainingProcessor(BaseProcessor):
+    def read_chinese_examples(self, line_list, is_training, 
+        first_answer_only, replace_mask, do_lower_case,
+        remove_query_in_passage):
+        """Read a Chinese json file for pretraining into a list of MRQAExample."""
+        input_data = [json.loads(line) for line in line_list] #.decode('utf-8').strip()
+
+        def is_whitespace(c):
+            if c == " " or c == "\t" or c == "\r" or c == "\n" or ord(c) == 0x202F:
+                return True
+
+            cat = unicodedata.category(c)
+            if cat == "Zs":
+                return True
+                
+            return False
+
+        examples = []
+        num_answers = 0
+        for i, article in enumerate(input_data):
+            for entry in article["paragraphs"]:
+                paragraph_text = entry["context"].strip()
+                raw_doc_tokens = self.tokenize_chinese(paragraph_text, 
+                        masking = None,
+                        do_lower_case= do_lower_case)
+                doc_tokens = []
+                char_to_word_offset = []
+                prev_is_whitespace = True
+                
+                k = 0
+                temp_word = ""
+                for c in paragraph_text:
+                    if is_whitespace(c):
+                        char_to_word_offset.append(k - 1)
+                        continue
+                    else:
+                        temp_word += c
+                        char_to_word_offset.append(k)
+
+                    if do_lower_case:
+                        temp_word = temp_word.lower()
+
+                    if temp_word == raw_doc_tokens[k]:
+                        doc_tokens.append(temp_word)
+                        temp_word = ""
+                        k += 1
+
+                if k != len(raw_doc_tokens):
+                    self.logger.info("Warning: paragraph '{}' tokenization error ".format(paragraph_text))
+                    continue
+
+                for qa in entry["qas"]:
+                    qas_id = article["id"] + "_" + entry["id"] + "_" + qa["id"]
+                    if qa["question"].find('UNK') == -1:
+                        print(f"WARNING: Cannot Find UNK in Question %s" % qas_id)
+                        continue
+
+                    if remove_query_in_passage:
+                        query = qa["question"]
+                        mask_start = query.find("UNK")
+                        mask_end = mask_start + 3
+                        pattern = (re.escape(unicodedata.normalize('NFKC', query[:mask_start].strip())) + 
+                            ".*" + re.escape(unicodedata.normalize('NFKC', query[mask_end:].strip())))
+                        if re.search(pattern,
+                            unicodedata.normalize('NFKC', paragraph_text)) is not None:
+                            #print(f"WARNING: Query in Passage Detected in Question %s" % qas_id)
+                            #print("Question", query, "Passage", paragraph_text)
+                            continue
+
+                    question_text = qa["question"].replace("UNK", replace_mask)
+                    is_impossible = qa.get('is_impossible', False)
+                    start_position = None
+                    end_position = None
+                    orig_answer_text = None
+                    
+                    answers = qa["answers"]
+                    num_answers += sum([len(spans['answer_all_start']) for spans in answers])
+                    
+                    # import ipdb
+                    # ipdb.set_trace()
+                    spans = sorted([[start, start + len(ans['text']) - 1, ans['text']] 
+                        for ans in answers for start in ans['answer_all_start']])
+                    #print("spans", spans)
+                    # take first span
+                    if first_answer_only:
+                        include_span_num = 1
+                    else:
+                        include_span_num = len(spans)
+
+                    start_positions = []
+                    end_positions = []
+                    for i in range(min(include_span_num, len(spans))):
+                        char_start, char_end, answer_text = spans[i][0], spans[i][1], spans[i][2]
+                        orig_answer_text = paragraph_text[char_start:char_end+1]
+                        #print("orig_answer_text", orig_answer_text)
+                        if orig_answer_text != answer_text:
+                            self.logger.info("Answer error: {}, Original {}".format(
+                                answer_text, orig_answer_text))
+                            continue
+                        
+                        start_position, end_position = char_to_word_offset[char_start], char_to_word_offset[char_end]
+                        #print("start_position", "end_position", start_position, end_position)
+                        #print("doc_tokens", doc_tokens)
+                        start_positions.append(start_position)
+                        end_positions.append(end_position)
+
+                    if len(spans) == 0:
+                        start_positions.append(0)
+                        end_positions.append(0)
+
+                    if first_answer_only:
+                        start_positions = start_positions[0]
+                        end_positions = end_positions[0]
+
+                    example = MRQAExample(
+                        qas_id=qas_id,
+                        question_text=question_text, #question
+                        #paragraph_text=paragraph_text, # context text
+                        doc_tokens=doc_tokens, #passage text
+                        orig_answer_text=orig_answer_text, # answer text
+                        start_positions=start_positions, #answer start
+                        end_positions=end_positions, #answer end
+                        is_impossible=is_impossible)
+                    examples.append(example)
+
+
+        #logger.info('Num avg answers: {}'.format(num_answers / len(examples)))
+        return examples
+        
+
     def read_pretraining_en_examples(self, line_list, is_training, 
                 first_answer_only, replace_mask, do_lower_case):
         """Read a Chinese json file for pretraining into a list of MRQAExample."""
@@ -519,7 +692,7 @@ class PretrainingProcessor(BaseProcessor):
         return examples
 
     def convert_pretraining_examples_to_features(self, *args, **kwargs):
-        return self._convert_en_examples_to_features(*args, **kwargs)
+        return self._convert_examples_to_features(*args, **kwargs)
 
 
 class MRQAProcessor(BaseProcessor):
@@ -829,3 +1002,169 @@ class MRQAProcessor(BaseProcessor):
     def process(self, file_path):
         pass
 
+class CMRCProcessor(BaseProcessor):
+    def read_crmc_examples(self, input_file, is_training, 
+            first_answer_only, do_lower_case,
+            remove_query_in_passage):
+        """Read crmc json file for pretraining into a list of MRQAExample."""
+        with open(input_file, 'r', encoding='utf-8') as fin:
+            # skip header
+            input_js = json.load(fin)
+            input_data = input_js["data"]
+
+        def is_whitespace(c):
+            if c == " " or c == "\t" or c == "\r" or c == "\n" or ord(c) == 0x202F:
+                return True
+
+            cat = unicodedata.category(c)
+            if cat == "Zs":
+                return True
+                
+            return False
+
+        examples = []
+        num_answers = 0
+        datasets = []
+        for i, article in enumerate(input_data):
+            for entry in article["paragraphs"]:
+                paragraph_text = entry["context"].strip()
+                raw_doc_tokens = self.tokenize_chinese(paragraph_text, 
+                        masking = None,
+                        do_lower_case= do_lower_case)
+                doc_tokens = []
+                char_to_word_offset = []
+                prev_is_whitespace = True
+                
+                k = 0
+                temp_word = ""
+                for c in paragraph_text:
+                    if is_whitespace(c):
+                        char_to_word_offset.append(k - 1)
+                        continue
+                    else:
+                        temp_word += c
+                        char_to_word_offset.append(k)
+
+                    if do_lower_case:
+                        temp_word = temp_word.lower()
+
+                    if temp_word == raw_doc_tokens[k]:
+                        doc_tokens.append(temp_word)
+                        temp_word = ""
+                        k += 1
+
+                if k != len(raw_doc_tokens):
+                    self.logger.info("Warning: paragraph '{}' tokenization error'{}'".format(paragraph_text))
+                    continue
+
+                for qa in entry["qas"]:
+                    qas_id = qa["id"]
+                    '''if qa["question"].find('UNK') == -1:
+                        logger.info(f"WARNING: Cannot Find UNK in Question %s" % qas_id)
+                        continue'''
+
+                    if remove_query_in_passage:
+                        query = qa["question"]
+                        mask_start = query.find("UNK")
+                        mask_end = mask_start + 3
+                        pattern = (re.escape(unicodedata.normalize('NFKC', query[:mask_start].strip())) + 
+                            ".*" + re.escape(unicodedata.normalize('NFKC', query[mask_end:].strip())))
+                        if re.search(pattern,
+                            unicodedata.normalize('NFKC', paragraph_text)) is not None:
+                            #print(f"WARNING: Query in Passage Detected in Question %s" % qas_id)
+                            #print("Question", query, "Passage", paragraph_text)
+                            continue
+
+                    question_text = qa["question"]# .replace("UNK", replace_mask)
+                    is_impossible = qa.get('is_impossible', False)
+                    start_position = None
+                    end_position = None
+                    orig_answer_text = None
+                    
+                    answers = qa["answers"]
+                    num_answers += len(answers)
+                    
+                    # import ipdb
+                    # ipdb.set_trace()
+                    '''
+                    [
+                        [ans['answer_start'] + 1, 
+                        ans['answer_start'] + len(ans['text']), 
+                        ans['text']] 
+                        for ans in answers]
+                    '''
+                    ans_list = []
+                    answer_text_list = []
+                    for ans in answers:
+                        answer_text_list.append(ans['text'])
+                        if ans['answer_start'] == -1:
+                            continue
+
+                        if paragraph_text[ans['answer_start']:].startswith(ans['text']):
+                            ans_list.append([ans['answer_start'], 
+                                ans['answer_start'] + len(ans['text']) - 1, 
+                                ans['text']]
+                                )
+                        elif paragraph_text[ans['answer_start'] - 2:].startswith(ans['text']):
+                            ans_list.append([ans['answer_start'] - 2, 
+                                ans['answer_start'] + len(ans['text']) - 3, 
+                                ans['text']]
+                                )
+                        else:
+                            ans_list.append([ans['answer_start'] - 1, 
+                                ans['answer_start'] + len(ans['text']) - 2, 
+                                ans['text']]
+                                )
+
+                    spans = sorted(ans_list)
+                    #print("spans", spans)
+                    # take first span
+                    if first_answer_only:
+                        include_span_num = 1
+                    else:
+                        include_span_num = len(spans)
+
+                    start_positions = []
+                    end_positions = []
+                    for i in range(min(include_span_num, len(spans))):
+                        char_start, char_end, answer_text = spans[i][0], spans[i][1], spans[i][2]
+                        orig_answer_text = paragraph_text[char_start:char_end+1]
+                        #print("orig_answer_text", orig_answer_text)
+                        if orig_answer_text != answer_text:
+                            self.logger.info("Answer error: {}, Original {}".format(
+                                answer_text, orig_answer_text))
+                            print(paragraph_text[char_start:])
+                            continue
+                        
+                        start_position, end_position = char_to_word_offset[char_start], char_to_word_offset[char_end]
+                        #print("start_position", "end_position", start_position, end_position)
+                        #print("doc_tokens", doc_tokens)
+                        start_positions.append(start_position)
+                        end_positions.append(end_position)
+
+                    if len(spans) == 0:
+                        start_positions.append(0)
+                        end_positions.append(0)
+
+                    if first_answer_only:
+                        start_positions = start_positions[0]
+                        end_positions = end_positions[0]
+
+                    datasets.append({'qid': qas_id, 'answers': answer_text_list})
+
+                    example = MRQAExample(
+                        qas_id=qas_id,
+                        question_text=question_text, #question
+                        #paragraph_text=paragraph_text, # context text
+                        doc_tokens=doc_tokens, #passage text
+                        orig_answer_text=orig_answer_text, # answer text
+                        start_positions=start_positions, #answer start
+                        end_positions=end_positions, #answer end
+                        start_position=start_positions,
+                        end_position=end_positions,
+                        is_impossible=is_impossible)
+                    examples.append(example)
+
+
+        #logger.info('Num avg answers: {}'.format(num_answers / len(examples)))
+        return examples, datasets
