@@ -1,5 +1,9 @@
 import collections
+import logging
+import math
 from pytorch_pretrained_bert.tokenization import BasicTokenizer, BertTokenizer
+logger = logging.getself.logger("__main__")
+
 def make_predictions(all_examples, all_features, all_results, n_best_size,
                      max_answer_length, do_lower_case, verbose_logging):
     example_index_to_features = collections.defaultdict(list)
