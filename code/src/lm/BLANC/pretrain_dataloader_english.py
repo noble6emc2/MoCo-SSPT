@@ -5,6 +5,7 @@ import numpy as np
 import torch
 import json
 import run_mrqa_blanc_pretraining_english as p_en
+from pytorch_pretrained_bert.dataset_processor import PretrainingProcessor, SQuADProcessor
 from pytorch_pretrained_bert.tokenization import BasicTokenizer, BertTokenizer
 from multiprocessing import Process, Queue
 
@@ -28,17 +29,20 @@ def move_to_cuda(sample):
 
     return _move_to_cuda(sample)
 
+
 def tokenize(text):
     tokens = []
     for t in text:
         tokens.append(t)
     return tokens
 
+
 def convert_tokens_to_ids(tokens, word2id):
     token_ids = []
     for idx, f in enumerate(tokens):
         token_ids.append(word2id[f] if f in word2id else word2id['[UNK]'])
     return token_ids
+
 
 def multi_process_get_training_data_queue(args, start, end, p_list):
     def enqueue(q, offset):
@@ -50,9 +54,6 @@ def multi_process_get_training_data_queue(args, start, end, p_list):
             args.tokenizer, do_lower_case=args.do_lower_case)
 
         while True:
-            #print('first_time:', first_time)
-            #sys.stdout.flush()
-            
             if first_time:
                 fi.seek(int(offset))
                 first_time = False
@@ -80,7 +81,14 @@ def multi_process_get_training_data_queue(args, start, end, p_list):
                     #sys.stdout.flush()
                     continue
 
-                examples = p_en.read_english_examples(
+                dataset_processor = PretrainingProcessor()
+                '''examples = p_en.read_english_examples(
+                    line_list=[line], is_training=True, 
+                    first_answer_only=True, 
+                    replace_mask="[unused1]",
+                    do_lower_case=args.do_lower_case,
+                    )'''
+                examples = dataset_processor.read_english_examples(
                     line_list=[line], is_training=True, 
                     first_answer_only=True, 
                     replace_mask="[unused1]",
@@ -90,7 +98,15 @@ def multi_process_get_training_data_queue(args, start, end, p_list):
                 if len(examples) == 0:
                     continue
                 
-                train_features = p_en.convert_english_examples_to_features(
+                '''train_features = p_en.convert_english_examples_to_features(
+                    examples=examples,
+                    tokenizer=tokenizer,
+                    max_seq_length=args.max_seq_length,
+                    doc_stride=args.doc_stride,
+                    max_query_length=args.max_query_length,
+                    is_training=True,
+                    first_answer_only=True)'''
+                train_features = dataset_processor.convert_english_examples_to_features(
                     examples=examples,
                     tokenizer=tokenizer,
                     max_seq_length=args.max_seq_length,

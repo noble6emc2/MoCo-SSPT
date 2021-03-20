@@ -567,9 +567,9 @@ class PretrainingProcessor(BaseProcessor):
         return examples
         
 
-    def read_pretraining_en_examples(self, line_list, is_training, 
+    def read_english_examples(self, line_list, is_training, 
                 first_answer_only, replace_mask, do_lower_case):
-        """Read a Chinese json file for pretraining into a list of MRQAExample."""
+        """Read a English json file for pretraining into a list of MRQAExample."""
         input_data = [json.loads(line) for line in line_list] #.decode('utf-8').strip()
 
         def is_whitespace(c):
@@ -691,7 +691,10 @@ class PretrainingProcessor(BaseProcessor):
         #self.logger.info('Num avg answers: {}'.format(num_answers / len(examples)))
         return examples
 
-    def convert_pretraining_examples_to_features(self, *args, **kwargs):
+    def convert_english_examples_to_features(self, *args, **kwargs):
+        return self._convert_examples_to_features(*args, **kwargs)
+
+    def convert_chinese_examples_to_features(self, *args, **kwargs):
         return self._convert_examples_to_features(*args, **kwargs)
 
 
@@ -773,75 +776,111 @@ class MRQAProcessor(BaseProcessor):
         pass
 
 
-class MRQAProcessor(BaseProcessor):
-    def read_mrqa_examples(self, input_file, is_training, 
-            first_answer_only, do_lower_case,
-            remove_query_in_passage):
-        """Read crmc json file for pretraining into a list of MRQAExample."""
-        with gzip.GzipFile(input_file, 'r') as reader:
-            # skip header
-            content = reader.read().decode('utf-8').strip().split('\n')[1:]
-            input_data = [json.loads(line) for line in content]
+class SQuADProcessor(BaseProcessor):
+    def read_squad_examples(self, input_file, is_training, version_2_with_negative):
+        """Read a SQuAD json file into a list of SquadExample."""
+        with open(input_file, "r", encoding='utf-8') as reader:
+            input_data = json.load(reader)["data"]
 
         def is_whitespace(c):
             if c == " " or c == "\t" or c == "\r" or c == "\n" or ord(c) == 0x202F:
-                return True 
+                return True
             return False
 
         examples = []
-        num_answers = 0
-        datasets = []
-        for i, entry in enumerate(input_data):
-            if i % 1000 == 0:
-                self.logger.info("Processing %d / %d.." % (i, len(input_data)))
-
-            paragraph_text = entry["context"]
-            doc_tokens = []
-            char_to_word_offset = []
-            prev_is_whitespace = True
-            for c in paragraph_text:
-                if is_whitespace(c):
-                    prev_is_whitespace = True
-                else:
-                    if prev_is_whitespace:
-                        doc_tokens.append(c)
+        for entry in input_data:
+            for paragraph in entry["paragraphs"]:
+                paragraph_text = paragraph["context"]
+                doc_tokens = []
+                char_to_word_offset = []
+                prev_is_whitespace = True
+                for c in paragraph_text:
+                    if is_whitespace(c):
+                        prev_is_whitespace = True
                     else:
-                        doc_tokens[-1] += c
-                    prev_is_whitespace = False
-                char_to_word_offset.append(len(doc_tokens) - 1)
+                        if prev_is_whitespace:
+                            doc_tokens.append(c)
+                        else:
+                            doc_tokens[-1] += c
+                        prev_is_whitespace = False
+                    char_to_word_offset.append(len(doc_tokens) - 1)
 
-            for qa in entry["qas"]:
-                qas_id = qa["qid"]
-                question_text = qa["question"]# .replace("UNK", replace_mask)
-                is_impossible = qa.get('is_impossible', False)
-                start_position = None
-                end_position = None
-                orig_answer_text = None
-                
-                answers = qa["detected_answers"]
-                # import ipdb
-                # ipdb.set_trace()
-                spans = sorted([span for spans in answers for span in spans['char_spans']])
-                # take first span
-                char_start, char_end = spans[0][0], spans[0][1]
-                orig_answer_text = paragraph_text[char_start:char_end+1]
-                start_position, end_position = char_to_word_offset[char_start], char_to_word_offset[char_end]
-                num_answers += sum([len(spans['char_spans']) for spans in answers])
+                for qa in paragraph["qas"]:
+                    qas_id = qa["id"]
+                    question_text = qa["question"]
+                    start_position = None
+                    end_position = None
+                    orig_answer_text = None
+                    is_impossible = False
+                    start_positions = []
+                    end_positions = []
+                    orig_answer_texts = []
+                    if is_training:
+                        if version_2_with_negative:
+                            is_impossible = qa["is_impossible"]
+                        if (len(qa["answers"]) != 1) and (not is_impossible):
+                            raise ValueError(
+                                "For training, each question should have exactly 1 answer.")
+                        if not is_impossible:
+                            answer = qa["answers"][0]
+                            orig_answer_text = answer["text"]
+                            answer_offset = answer["answer_start"]
+                            answer_length = len(orig_answer_text)
+                            start_position = char_to_word_offset[answer_offset]
+                            end_position = char_to_word_offset[answer_offset + answer_length - 1]
+                            actual_text = " ".join(doc_tokens[start_position:(end_position + 1)])
+                            cleaned_answer_text = " ".join(
+                                whitespace_tokenize(orig_answer_text))
+                            if actual_text.find(cleaned_answer_text) == -1:
+                                logger.warning("Could not find answer: '%s' vs. '%s'",
+                                            actual_text, cleaned_answer_text)
+                                continue
+                        else:
+                            start_position = -1
+                            end_position = -1
+                            orig_answer_text = ""
+                    else:
+                        if version_2_with_negative:
+                            is_impossible = qa["is_impossible"]
+                        if not is_impossible:
+                            answers = qa["answers"]
+                            for answer in answers:
+                                orig_answer_text = answer["text"]
+                                answer_offset = answer["answer_start"]
+                                answer_length = len(orig_answer_text)
+                                start_position = char_to_word_offset[answer_offset]
+                                end_position = char_to_word_offset[answer_offset + answer_length - 1]
+                                actual_text = " ".join(doc_tokens[start_position:(end_position + 1)])
+                                cleaned_answer_text = " ".join(
+                                    whitespace_tokenize(orig_answer_text))
+                                if actual_text.find(cleaned_answer_text) == -1:
+                                    logger.warning("Could not find answer: '%s' vs. '%s'",
+                                                actual_text, cleaned_answer_text)
+                                    continue
+                                start_positions.append(start_position)
+                                end_positions.append(end_position)
+                                orig_answer_texts.append(orig_answer_text)
 
-                example = MRQAExample(
-                    qas_id=qas_id,
-                    question_text=question_text, #question
-                    #paragraph_text=paragraph_text, # context text
-                    doc_tokens=doc_tokens, #passage text
-                    orig_answer_text=orig_answer_text, # answer text
-                    start_positions=start_position, #answer start
-                    end_positions=end_position, #answer end
-                    start_position=start_position,
-                    end_position=end_position,
-                    is_impossible=is_impossible)
-                examples.append(example)
+                        else:
+                            start_position = -1
+                            end_position = -1
+                            orig_answer_text = ""
+                            start_positions.append(start_position)
+                            end_positions.append(end_position)
+                            orig_answer_texts.append(orig_answer_text)
 
-        self.logger.info('Num avg answers: {}'.format(num_answers / len(examples)))
+                    example = SquadExample(
+                        qas_id=qas_id,
+                        question_text=question_text,
+                        doc_tokens=doc_tokens,
+                        orig_answer_text=orig_answer_text,
+                        start_position=start_position,
+                        end_position=end_position,
+                        is_impossible=is_impossible,
+                        start_positions=start_positions,
+                        end_positions=end_positions,
+                        orig_answer_texts=orig_answer_texts)
+                    examples.append(example)
         return examples
 
     def convert_squad_examples_to_features(self, examples, tokenizer, max_seq_length,

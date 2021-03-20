@@ -6,6 +6,7 @@ import torch
 import json
 import run_mrqa_blanc_pretraining_chinese as p_cn
 from pytorch_pretrained_bert.tokenization import BasicTokenizer, BertTokenizer
+from pytorch_pretrained_bert.dataset_processor import PretrainingProcessor
 from multiprocessing import Process, Queue
 
 
@@ -39,86 +40,6 @@ def convert_tokens_to_ids(tokens, word2id):
     for idx, f in enumerate(tokens):
         token_ids.append(word2id[f] if f in word2id else word2id['[UNK]'])
     return token_ids
-
-def get_training_data_queue(args):
-    def enqueue(q, offset):
-        print("train file offset: ", offset)
-        fi = open(args.train_file, 'rb')
-        cache = [None] * 10000
-        first_time = True
-        tokenizer = BertTokenizer.from_pretrained(
-            args.tokenizer, do_lower_case=args.do_lower_case)
-
-        while True:
-            #print('first_time:', first_time)
-            #sys.stdout.flush()
-            
-            if first_time:
-                fi.seek(int(offset))
-                first_time = False
-            else:
-                fi.seek(0)
-
-            for line in fi:
-                try:
-                    line = line.rstrip().decode('utf-8')
-                    sample_json = json.loads(line)
-                except UnicodeDecodeError:
-                    print(f"WARNING: one training line decode utf-8 ERROR")
-                    sys.stdout.flush()
-                    continue
-                except json.decoder.JSONDecodeError:
-                    print(f"WARNING: json.decoder.JSONDecodeError  ERROR")
-                    sys.stdout.flush()
-                    continue
-
-                examples = p_cn.read_chinese_examples(
-                    line_list=line, is_training=True)
-                train_features = p_cn.convert_examples_to_features(
-                    examples=examples,
-                    tokenizer=tokenizer,
-                    max_seq_length=args.max_seq_length,
-                    doc_stride=args.doc_stride,
-                    max_query_length=args.max_query_length,
-                    is_training=True)
-
-                if len(train_features) != 1:
-                    print("get_training_data_data_queue WARNING: length of train_features != 1")
-
-                '''
-                if max([l for a, l in data[2]]) <= 0:
-                    print(f"WARNING: {data[0]} has no positive label*********************")
-                    sys.stdout.flush()
-                    continue
-                '''
-
-                insert_idx = np.random.randint(0, len(cache))
-                if cache[insert_idx] is None:
-                    cache[insert_idx] = train_features[0]
-                else:
-                    q.put(cache[insert_idx])
-                    cache[insert_idx] = train_features[0]
-
-                del line
-                del sample_json
-
-    total_bytes = os.path.getsize(args.train_file)
-    print("train file total bytes: ", total_bytes)
-
-    if sys.version_info.major == 3:
-        import queue
-        q = queue.Queue(maxsize=500000)
-    else:
-        import Queue
-        q = Queue.Queue(maxsize=500000)
-
-    for i in range(args.enqueue_thread_num):
-        print("enqueue thread started : ", i)
-        enqeue_thread = threading.Thread(target=enqueue, args=(q, i * np.random.rand() * total_bytes / (args.enqueue_thread_num + 1)))
-        enqeue_thread.setDaemon(True)
-        enqeue_thread.start()
-    return q
-
 
 def multi_process_get_training_data_queue(args, start, end, p_list):
     def enqueue(q, offset):
@@ -160,7 +81,14 @@ def multi_process_get_training_data_queue(args, start, end, p_list):
                     #sys.stdout.flush()
                     continue
 
-                examples = p_cn.read_chinese_examples(
+                '''examples = p_cn.read_chinese_examples(
+                    line_list=[line], is_training=True, 
+                    first_answer_only=True, 
+                    replace_mask="[unused1]",
+                    do_lower_case=args.do_lower_case,
+                    remove_query_in_passage=args.remove_query_in_passage)'''
+                data_processor = PretrainingProcessor()
+                examples =  data_processor.read_chinese_examples(
                     line_list=[line], is_training=True, 
                     first_answer_only=True, 
                     replace_mask="[unused1]",
@@ -170,7 +98,15 @@ def multi_process_get_training_data_queue(args, start, end, p_list):
                 if len(examples) == 0:
                     continue
                 
-                train_features = p_cn.convert_chinese_examples_to_features(
+                '''train_features = p_cn.convert_chinese_examples_to_features(
+                    examples=examples,
+                    tokenizer=tokenizer,
+                    max_seq_length=args.max_seq_length,
+                    doc_stride=args.doc_stride,
+                    max_query_length=args.max_query_length,
+                    is_training=True,
+                    first_answer_only=True)'''
+                train_features = data_processor.convert_chinese_examples_to_features(
                     examples=examples,
                     tokenizer=tokenizer,
                     max_seq_length=args.max_seq_length,

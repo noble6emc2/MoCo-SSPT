@@ -32,6 +32,8 @@ from torch.utils.data import DataLoader, TensorDataset
 from pytorch_pretrained_bert.file_utils import PYTORCH_PRETRAINED_BERT_CACHE
 from pytorch_pretrained_bert.file_utils import WEIGHTS_NAME, CONFIG_NAME
 from pytorch_pretrained_bert.blanc import BLANC, BertForQuestionAnswering
+from pytorch_pretrained_bert.predictions import make_predictions
+from pytorch_pretrained_bert.evaluation import MRQAEvaluator, SQuADEvaluator
 from pytorch_pretrained_bert.optimization import BertAdam, warmup_linear
 from pytorch_pretrained_bert.tokenization import BasicTokenizer, BertTokenizer, whitespace_tokenize
 from pytorch_pretrained_bert.tokenization import _is_punctuation, _is_whitespace, _is_control
@@ -41,6 +43,7 @@ PRED_FILE = "predictions.json"
 EVAL_FILE = "eval_results.txt"
 TEST_FILE = "test_results.txt"
 MODEL_TYPES = ["BLANC", "BertForQA"]
+DATASET_TYPES = ["MRQA", "SQuAD"]
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
                     datefmt='%m/%d/%Y %H:%M:%S',
@@ -514,7 +517,7 @@ RawResult = collections.namedtuple("RawResult",
                                    ["unique_id", "start_logits", "end_logits"])
 
 
-def make_predictions(all_examples, all_features, all_results, n_best_size,
+'''def make_predictions(all_examples, all_features, all_results, n_best_size,
                      max_answer_length, do_lower_case, verbose_logging):
     example_index_to_features = collections.defaultdict(list)
     for feature in all_features:
@@ -732,8 +735,8 @@ def _compute_softmax(scores):
     for score in exp_scores:
         probs.append(score / total_sum)
     return probs
-
-
+'''
+'''
 def make_qid_to_has_ans(dataset):
     qid_to_has_ans = {}
     for article in dataset:
@@ -985,7 +988,7 @@ def evaluate(args, model, device, eval_dataset, eval_dataloader,
         for key in sorted(result.keys()):
             logger.info("  %s = %s", key, str(result[key]))
     return result, preds, nbest_preds
-
+'''
 def main(args):
     device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
     n_gpu = torch.cuda.device_count()
@@ -1072,16 +1075,18 @@ def main(args):
         best_result = None
         lrs = [args.learning_rate] if args.learning_rate else [1e-6, 2e-6, 3e-6, 5e-6, 1e-5, 2e-5, 3e-5, 5e-5]
         for lr in lrs:
-            assert args.model_type in MODEL_TYPES
             if args.model_type == "BLANC":
                 model, pretrained_weights = BLANC.from_pretrained(
                     args.model, cache_dir=PYTORCH_PRETRAINED_BERT_CACHE)
             elif args.model_type == "BertForQA":
                 model, pretrained_weights = BertForQuestionAnswering.from_pretrained(
                     args.model, cache_dir=PYTORCH_PRETRAINED_BERT_CACHE)
+            else:
+                raise NotImplementedError("Unknown Model Type")
 
             if args.fp16:
                 model.half()
+                
             model.to(device)
             if n_gpu > 1:
                 model = torch.nn.DataParallel(model)
@@ -1175,21 +1180,10 @@ def main(args):
 
                         save_model = False
                         if args.do_eval:
-                            result, _, _ = \
-                                evaluate(args, model, device, eval_dataset,
-                                         eval_dataloader, eval_examples, eval_features)
-                            model.train()
-                            result['global_step'] = global_step
-                            result['epoch'] = epoch
-                            result['learning_rate'] = lr
-                            result['batch_size'] = args.train_batch_size
-                            if (best_result is None) or (result[args.eval_metric] > best_result[args.eval_metric]):
-                                best_result = result
-                                save_model = True
-                                logger.info("!!! Best dev %s (lr=%s, epoch=%d): %.2f" %
-                                            (args.eval_metric, str(lr), epoch, result[args.eval_metric]))
+                            raise NotImplementedError('This branch should not be entered')
                         else:
                             save_model = True
+
                         if save_model:
                             model_to_save = model.module if hasattr(model, 'module') else model
                             output_model_file = os.path.join(args.output_dir, WEIGHTS_NAME)
@@ -1489,8 +1483,6 @@ def main_cotraining(args):
                                 loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, lmbs=lmbs_b, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb, batch_idx_mask=None)
                         else:
                             raise Exception("Unsuppoted co training mode.")
-
-
                     
                     if n_gpu > 1:
                         loss_a = loss_a.mean()
@@ -1541,31 +1533,7 @@ def main_cotraining(args):
 
                         save_model = False
                         if args.do_eval:
-                            result_a, _, _ = \
-                                evaluate(args, model_a, device, eval_dataset,
-                                         eval_dataloader, eval_examples, eval_features)
-                            result_b, _, _ = \
-                                evaluate(args, model_b, device, eval_dataset,
-                                         eval_dataloader, eval_examples, eval_features)
-                            model_a.train()
-                            model_b.train()
-                            result_a['global_step'] = global_step
-                            result_a['epoch'] = epoch
-                            result_a['learning_rate'] = lr
-                            result_a['batch_size'] = args.train_batch_size
-                            result_b['global_step'] = global_step
-                            result_b['epoch'] = epoch
-                            result_b['learning_rate'] = lr
-                            result_b['batch_size'] = args.train_batch_size
-                            if (best_result is None) or (
-                                    max(result_a[args.eval_metric], result_b[args.eval_metric]) 
-                                    > best_result[args.eval_metric]):
-                                best_result = (result_b 
-                                    if result_b[args.eval_metric] > result_a[args.eval_metric] 
-                                    else result_a)
-                                save_model = True
-                                logger.info("!!! Best dev %s (lr=%s, epoch=%d): %.2f" %
-                                            (args.eval_metric, str(lr), epoch, best_result[args.eval_metric]))
+                            raise NotImplementedError('This branch should not be entered')
                         else:
                             save_model = True
 
@@ -1709,15 +1677,15 @@ def main_finetuning(args):
 
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
+
     if args.do_train:
         logger.addHandler(logging.FileHandler(os.path.join(args.output_dir, "train.log"), 'w'))
     else:
         logger.addHandler(logging.FileHandler(os.path.join(args.output_dir, "eval.log"), 'w'))
+    
     logger.info(args)
-
     tokenizer = BertTokenizer.from_pretrained(
         args.tokenizer, do_lower_case=args.do_lower_case)
-
     if args.do_eval and (args.do_train or (not args.eval_test)):
         #with gzip.GzipFile(args.dev_file, 'r') as reader:
         #    content = reader.read().decode('utf-8').strip().split('\n')[1:]
@@ -1889,9 +1857,17 @@ def main_finetuning(args):
 
                         save_model = False
                         if args.do_eval:
-                            result, _, _ = \
-                                evaluate(args, model, device, eval_dataset,
-                                         eval_dataloader, eval_examples, eval_features)
+                            if args.dataset_type == "MRQA":
+                                result, _, _ = \
+                                    MRQAEvaluator.evaluate(args, model, device, eval_dataset,
+                                            eval_dataloader, eval_examples, eval_features)
+                            elif args.dataset_type == "SQuAD":
+                                result, _, _ = \
+                                    SQuADEvaluator.evaluate(args, model, device, eval_dataset,
+                                            eval_dataloader, eval_examples, eval_features)
+                            else:
+                                raise NotImplementedError("Dataset type is not supported.")
+
                             model.train()
                             for res_k, res_v in result.items():
                                 tb_writer.add_scalar(
@@ -2282,105 +2258,114 @@ def main_model_testing(args):
     eval_data = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_example_index)
     eval_dataloader = DataLoader(eval_data, batch_size=args.eval_batch_size)
 
-    result, _, _ = \
-            evaluate(args, model, device, eval_dataset,
-                        eval_dataloader, eval_examples, eval_features)
+    if args.dataset_type == "MRQA":
+        result, _, _ = \
+                MRQAEvaluator.evaluate(args, model, device, eval_dataset,
+                            eval_dataloader, eval_examples, eval_features)
+    elif args.dataset_type == "SQuAD":
+        result, _, _ = \
+                SQuADEvaluator.evaluate(args, model, device, eval_dataset,
+                            eval_dataloader, eval_examples, eval_features)
+    else:
+        raise NotImplementedError("Dataset type is not supported.")
+
     #model.train()
     result['batch_size'] = args.train_batch_size
     logger.info(result)
 
 
 if __name__ == "__main__":
-        parser = argparse.ArgumentParser()
-        parser.add_argument("--model", default="bert-base-chinese", type=str, required=True)
-        parser.add_argument("--model_type", choices=MODEL_TYPES, type=str, required=True)
-        parser.add_argument("--tokenizer", default="bert-base-chinese", type=str, required=True)
-        parser.add_argument("--output_dir", default=None, type=str, required=True,
-                            help="The output directory where the model checkpoints and predictions will be written.")
-        parser.add_argument("--train_file", default=None, type=str)
-        parser.add_argument("--dev_file", default=None, type=str)
-        parser.add_argument("--test_file", default=None, type=str)
-        parser.add_argument("--eval_per_epoch", default=10, type=int,
-                            help="How many times it evaluates on dev set per epoch")
-        parser.add_argument("--max_seq_length", default=384, type=int,
-                            help="The maximum total input sequence length after WordPiece tokenization. Sequences "
-                                 "longer than this will be truncated, and sequences shorter than this will be padded.")
-        parser.add_argument("--doc_stride", default=128, type=int,
-                            help="When splitting up a long document into chunks, "
-                                 "how much stride to take between chunks.")
-        parser.add_argument("--max_query_length", default=64, type=int,
-                            help="The maximum number of tokens for the question. Questions longer than this will "
-                                 "be truncated to this length.")
-        parser.add_argument("--do_train", action='store_true', help="Whether to run training.")
-        parser.add_argument("--train_mode", type=str, default='random', choices=['random', 'sorted', 'random_sorted'])
-        parser.add_argument("--do_eval", action='store_true', help="Whether to run eval on the dev set.")
-        #parser.add_argument("--do_lower_case", action='store_true', help="Set this flag if you are using an uncased model.")
-        parser.add_argument("--eval_test", action="store_true", help="Whether to evaluate on final test set.")
-        parser.add_argument("--train_batch_size", default=32, type=int, help="Total batch size for training.")
-        parser.add_argument("--eval_batch_size", default=8, type=int, help="Total batch size for predictions.")
-        parser.add_argument("--learning_rate", default=None, type=float, help="The initial learning rate for Adam.")
-        parser.add_argument("--num_train_epochs", default=1.0, type=float,
-                            help="Total number of training epochs to perform.")
-        parser.add_argument("--eval_metric", default='f1', type=str)
-        parser.add_argument("--warmup_proportion", default=0.1, type=float,
-                            help="Proportion of training to perform linear learning rate warmup for. E.g., 0.1 = 10%% "
-                                 "of training.")
-        parser.add_argument("--n_best_size", default=20, type=int,
-                            help="The total number of n-best predictions to generate in the nbest_predictions.json "
-                                 "output file.")
-        parser.add_argument("--max_answer_length", default=30, type=int,
-                            help="The maximum length of an answer that can be generated. "
-                                 "This is needed because the start "
-                                 "and end predictions are not conditioned on one another.")
-        parser.add_argument("--verbose_logging", action='store_true',
-                            help="If true, all of the warnings related to data processing will be printed. "
-                                 "A number of warnings are expected for a normal MRQA evaluation.")
-        parser.add_argument("--no_cuda", action='store_true',
-                            help="Whether not to use CUDA when available")
-        parser.add_argument('--seed', type=int, default=42,
-                            help="random seed for initialization")
-        parser.add_argument('--gradient_accumulation_steps', type=int, default=1,
-                            help="Number of updates steps to accumulate before performing a backward/update pass.")
-        parser.add_argument('--fp16', action='store_true',
-                            help="Whether to use 16-bit float precision instead of 32-bit")
-        parser.add_argument('--loss_scale', type=float, default=0,
-                            help="Loss scaling to improve fp16 numeric stability. Only used when fp16 set to True.\n"
-                                 "0 (default value): dynamic loss scaling.\n"
-                                 "Positive power of 2: static loss scaling value.\n")
-        parser.add_argument('--geometric_p', type=float, default=0.3)
-        parser.add_argument('--window_size', type=int, default=5)
-        parser.add_argument('--num_iteration', type=int, default=9375)
-        parser.add_argument('--lmb', type=float, default=0.5)
-        parser.add_argument('--do_lower_case', type=bool, default=True)
-        #parser.add_argument('--remove_query_in_passage', type=bool, default=True)
-        parser.add_argument('--co_training_mode', type=str, default='data_cur')
-        parser.add_argument('--enqueue_thread_num', type=int, default=4)
-        parser.add_argument('--is_co_training', type=bool, default=False)
-        parser.add_argument('--is_finetuning', type=bool, default=False)
-        parser.add_argument('--is_model_testing', type=bool, default=False)
-        parser.add_argument('--version_2_with_negative', type=bool, default=False)
-        parser.add_argument('--debug', type=bool, default=False)
-        parser.add_argument('--theta', type=float, default=0.8)
-        parser.add_argument('--moving_loss_warmup_ratio', type=float, default=0.3)
-        parser.add_argument('--moving_loss_num', type=int, default=8)
-        parser.add_argument('--new_cotraining_optimizer', type=bool, default=False)
-        parser.add_argument('--is_idx_mask', type=bool, default=False)
-        args = parser.parse_args()
-        args.output_dir_a = args.output_dir + "_a"
-        args.output_dir_b = args.output_dir + "_b"
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", default="bert-base-chinese", type=str, required=True)
+    parser.add_argument("--model_type", choices=MODEL_TYPES, type=str, required=True)
+    parser.add_argument("--dataset_type", choices=DATASET_TYPES, type=str, required=True)
+    parser.add_argument("--tokenizer", default="bert-base-chinese", type=str, required=True)
+    parser.add_argument("--output_dir", default=None, type=str, required=True,
+                        help="The output directory where the model checkpoints and predictions will be written.")
+    parser.add_argument("--train_file", default=None, type=str)
+    parser.add_argument("--dev_file", default=None, type=str)
+    parser.add_argument("--test_file", default=None, type=str)
+    parser.add_argument("--eval_per_epoch", default=10, type=int,
+                        help="How many times it evaluates on dev set per epoch")
+    parser.add_argument("--max_seq_length", default=384, type=int,
+                        help="The maximum total input sequence length after WordPiece tokenization. Sequences "
+                                "longer than this will be truncated, and sequences shorter than this will be padded.")
+    parser.add_argument("--doc_stride", default=128, type=int,
+                        help="When splitting up a long document into chunks, "
+                                "how much stride to take between chunks.")
+    parser.add_argument("--max_query_length", default=64, type=int,
+                        help="The maximum number of tokens for the question. Questions longer than this will "
+                                "be truncated to this length.")
+    parser.add_argument("--do_train", action='store_true', help="Whether to run training.")
+    parser.add_argument("--train_mode", type=str, default='random', choices=['random', 'sorted', 'random_sorted'])
+    parser.add_argument("--do_eval", action='store_true', help="Whether to run eval on the dev set.")
+    #parser.add_argument("--do_lower_case", action='store_true', help="Set this flag if you are using an uncased model.")
+    parser.add_argument("--eval_test", action="store_true", help="Whether to evaluate on final test set.")
+    parser.add_argument("--train_batch_size", default=32, type=int, help="Total batch size for training.")
+    parser.add_argument("--eval_batch_size", default=8, type=int, help="Total batch size for predictions.")
+    parser.add_argument("--learning_rate", default=None, type=float, help="The initial learning rate for Adam.")
+    parser.add_argument("--num_train_epochs", default=1.0, type=float,
+                        help="Total number of training epochs to perform.")
+    parser.add_argument("--eval_metric", default='f1', type=str)
+    parser.add_argument("--warmup_proportion", default=0.1, type=float,
+                        help="Proportion of training to perform linear learning rate warmup for. E.g., 0.1 = 10%% "
+                                "of training.")
+    parser.add_argument("--n_best_size", default=20, type=int,
+                        help="The total number of n-best predictions to generate in the nbest_predictions.json "
+                                "output file.")
+    parser.add_argument("--max_answer_length", default=30, type=int,
+                        help="The maximum length of an answer that can be generated. "
+                                "This is needed because the start "
+                                "and end predictions are not conditioned on one another.")
+    parser.add_argument("--verbose_logging", action='store_true',
+                        help="If true, all of the warnings related to data processing will be printed. "
+                                "A number of warnings are expected for a normal MRQA evaluation.")
+    parser.add_argument("--no_cuda", action='store_true',
+                        help="Whether not to use CUDA when available")
+    parser.add_argument('--seed', type=int, default=42,
+                        help="random seed for initialization")
+    parser.add_argument('--gradient_accumulation_steps', type=int, default=1,
+                        help="Number of updates steps to accumulate before performing a backward/update pass.")
+    parser.add_argument('--fp16', action='store_true',
+                        help="Whether to use 16-bit float precision instead of 32-bit")
+    parser.add_argument('--loss_scale', type=float, default=0,
+                        help="Loss scaling to improve fp16 numeric stability. Only used when fp16 set to True.\n"
+                                "0 (default value): dynamic loss scaling.\n"
+                                "Positive power of 2: static loss scaling value.\n")
+    parser.add_argument('--geometric_p', type=float, default=0.3)
+    parser.add_argument('--window_size', type=int, default=5)
+    parser.add_argument('--num_iteration', type=int, default=9375)
+    parser.add_argument('--lmb', type=float, default=0.5)
+    parser.add_argument('--do_lower_case', type=bool, default=True)
+    #parser.add_argument('--remove_query_in_passage', type=bool, default=True)
+    parser.add_argument('--co_training_mode', type=str, default='data_cur')
+    parser.add_argument('--enqueue_thread_num', type=int, default=4)
+    parser.add_argument('--is_co_training', type=bool, default=False)
+    parser.add_argument('--is_finetuning', type=bool, default=False)
+    parser.add_argument('--is_model_testing', type=bool, default=False)
+    parser.add_argument('--version_2_with_negative', type=bool, default=False)
+    parser.add_argument('--debug', type=bool, default=False)
+    parser.add_argument('--theta', type=float, default=0.8)
+    parser.add_argument('--moving_loss_warmup_ratio', type=float, default=0.3)
+    parser.add_argument('--moving_loss_num', type=int, default=8)
+    parser.add_argument('--new_cotraining_optimizer', type=bool, default=False)
+    parser.add_argument('--is_idx_mask', type=bool, default=False)
+    args = parser.parse_args()
+    args.output_dir_a = args.output_dir + "_a"
+    args.output_dir_b = args.output_dir + "_b"
 
-        print('------is_co_training-----: %s' % args.is_co_training)
-        print('------new_cotraining_optimizer-----: %s' % args.new_cotraining_optimizer)
+    print('------is_co_training-----: %s' % args.is_co_training)
+    print('------new_cotraining_optimizer-----: %s' % args.new_cotraining_optimizer)
 
-        if args.is_co_training:
-            logger.info('enter cotraining....')
-            main_cotraining(args)
-        elif args.is_finetuning:
-            logger.info('enter finetuning....')
-            main_finetuning(args)
-        elif args.is_model_testing:
-            logger.info('enter model testing....')
-            main_model_testing(args)
-        else:
-            logger.info('enter main....')
-            main(args)
+    if args.is_co_training:
+        logger.info('enter cotraining....')
+        main_cotraining(args)
+    elif args.is_finetuning:
+        logger.info('enter finetuning....')
+        main_finetuning(args)
+    elif args.is_model_testing:
+        logger.info('enter model testing....')
+        main_model_testing(args)
+    else:
+        logger.info('enter main....')
+        main(args)
