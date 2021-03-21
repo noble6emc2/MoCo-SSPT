@@ -436,6 +436,11 @@ class BaseProcessor(object):
         else:
             raise ValueError("Not running on Python2 or Python 3?")
     
+    def convert_english_examples_to_features(self, *args, **kwargs):
+        return self._convert_examples_to_features(*args, **kwargs)
+
+    def convert_chinese_examples_to_features(self, *args, **kwargs):
+        return self._convert_examples_to_features(*args, **kwargs)
 
 class PretrainingProcessor(BaseProcessor):
     def read_chinese_examples(self, line_list, is_training, 
@@ -691,12 +696,6 @@ class PretrainingProcessor(BaseProcessor):
         #self.logger.info('Num avg answers: {}'.format(num_answers / len(examples)))
         return examples
 
-    def convert_english_examples_to_features(self, *args, **kwargs):
-        return self._convert_examples_to_features(*args, **kwargs)
-
-    def convert_chinese_examples_to_features(self, *args, **kwargs):
-        return self._convert_examples_to_features(*args, **kwargs)
-
 
 class MRQAProcessor(BaseProcessor):
     def read_mrqa_examples(self, input_file, is_training, 
@@ -769,11 +768,11 @@ class MRQAProcessor(BaseProcessor):
         self.logger.info('Num avg answers: {}'.format(num_answers / len(examples)))
         return examples
 
+    def read_examples(self, *args, **kwargs):
+        return self.read_mrqa_examples(*args, **kwargs)
+
     def convert_mrqa_examples_to_features(self, *args, **kwargs):
         return self._convert_en_examples_to_features(*args, **kwargs)
-
-    def process(self, file_path):
-        pass
 
 
 class SQuADProcessor(BaseProcessor):
@@ -1038,11 +1037,11 @@ class SQuADProcessor(BaseProcessor):
 
         return features
 
-    def process(self, file_path):
-        pass
+    def read_examples(self, *args, **kwargs):
+        return self.read_squad_examples(*args, **kwargs)
 
 class CMRCProcessor(BaseProcessor):
-    def read_crmc_examples(self, input_file, is_training, 
+    def read_cmrc_examples(self, input_file, is_training, 
             first_answer_only, do_lower_case,
             remove_query_in_passage):
         """Read crmc json file for pretraining into a list of MRQAExample."""
@@ -1207,3 +1206,6 @@ class CMRCProcessor(BaseProcessor):
 
         #logger.info('Num avg answers: {}'.format(num_answers / len(examples)))
         return examples, datasets
+
+    def read_examples(self, *args, **kwargs):
+        return self.read_cmrc_examples(*args, **kwargs)
