@@ -247,7 +247,7 @@ class BaseProcessor(object):
                 else:
                     tok_end_position = len(all_doc_tokens) - 1
 
-                (tok_start_position, tok_end_position) = _improve_answer_span(
+                (tok_start_position, tok_end_position) = self._improve_answer_span(
                     all_doc_tokens, tok_start_position, tok_end_position, tokenizer,
                     example.orig_answer_text)
 
