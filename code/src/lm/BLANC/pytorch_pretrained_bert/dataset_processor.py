@@ -396,7 +396,7 @@ class BaseProcessor(object):
 
     def tokenize_chinese(self, text, masking, do_lower_case):
         temp_x = ""
-        text = convert_to_unicode(text)
+        text = self.convert_to_unicode(text)
         idx = 0
         if do_lower_case:
             text = text.lower()
