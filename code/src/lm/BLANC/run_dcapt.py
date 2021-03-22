@@ -26,14 +26,15 @@ sys.path.append(os.path.dirname(__file__))
 
 import numpy as np
 import torch
-import pretrain_dataloader_english as en_dataloader
 import datetime
+import pytorch_pretrained_bert.pretrain_dataloader_english as en_dataloader
+import pytorch_pretrained_bert.pretrain_dataloader_chinese as cn_dataloader
 from torch.utils.data import DataLoader, TensorDataset
 from pytorch_pretrained_bert.file_utils import PYTORCH_PRETRAINED_BERT_CACHE
 from pytorch_pretrained_bert.file_utils import WEIGHTS_NAME, CONFIG_NAME
 from pytorch_pretrained_bert.blanc import BLANC, BertForQuestionAnswering
 from pytorch_pretrained_bert.predictions import make_predictions
-from pytorch_pretrained_bert.evaluation import MRQAEvaluator, SQuADEvaluator
+from pytorch_pretrained_bert.evaluation import MRQAEvaluator, SQuADEvaluator, CMRCProcessor
 from pytorch_pretrained_bert.optimization import BertAdam, warmup_linear
 from pytorch_pretrained_bert.tokenization import BasicTokenizer, BertTokenizer, whitespace_tokenize
 from pytorch_pretrained_bert.tokenization import _is_punctuation, _is_whitespace, _is_control
@@ -44,7 +45,8 @@ PRED_FILE = "predictions.json"
 EVAL_FILE = "eval_results.txt"
 TEST_FILE = "test_results.txt"
 MODEL_TYPES = ["BLANC", "BertForQA"]
-DATASET_TYPES = ["MRQA", "SQuAD"]
+DATASET_TYPES = ["MRQA", "SQuAD", "CMRC"]
+LANG_TYPES = ['EN', 'CN']
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
                     datefmt='%m/%d/%Y %H:%M:%S',
@@ -99,33 +101,6 @@ def main(args):
         args.tokenizer, do_lower_case=args.do_lower_case)
 
     if args.do_train:
-        '''
-        train_examples = read_mrqa_examples(
-            input_file=args.train_file, is_training=True)
-        train_features = convert_examples_to_features(
-                examples=train_examples,
-                tokenizer=tokenizer,
-                max_seq_length=args.max_seq_length,
-                doc_stride=args.doc_stride,
-                max_query_length=args.max_query_length,
-                is_training=True)
-
-        if args.train_mode == 'sorted' or args.train_mode == 'random_sorted':
-            train_features = sorted(train_features, key=lambda f: np.sum(f.input_mask))
-        else:
-            random.shuffle(train_features)
-
-        all_input_ids = torch.tensor([f.input_ids for f in train_features], dtype=torch.long)
-        all_input_mask = torch.tensor([f.input_mask for f in train_features], dtype=torch.long)
-        all_segment_ids = torch.tensor([f.segment_ids for f in train_features], dtype=torch.long)
-        all_start_positions = torch.tensor([f.start_position for f in train_features], dtype=torch.long)
-        all_end_positions = torch.tensor([f.end_position for f in train_features], dtype=torch.long)
-        train_data = TensorDataset(all_input_ids, all_input_mask, all_segment_ids,
-                                   all_start_positions, all_end_positions)
-        train_dataloader = DataLoader(train_data, batch_size=args.train_batch_size)
-        train_batches = [batch for batch in train_dataloader]
-        '''
-
         num_train_optimization_steps = \
             args.num_iteration // args.gradient_accumulation_steps * args.num_train_epochs
         logger.info("***** Train *****")
@@ -191,8 +166,15 @@ def main(args):
                 model.train()
                 logger.info("Start epoch #{} (lr = {})...".format(epoch, lr))
                 running_loss = 0.0
+                if args.training_lang == 'EN':
+                    get_batch_fn = en_dataloader.get_training_batch_english
+                elif args.training_lang == 'CN':
+                    get_batch_fn = cn_dataloader.get_training_batch_chinese
+                else:
+                    raise NotImplementedError('This training language is not support')
+
                 for step, batch in tqdm(enumerate(
-                    en_dataloader.get_training_batch_english(
+                    get_batch_fn(
                         args, co_training = False, p_list = p_list)), 
                         total = args.num_iteration):
                     if step >= args.num_iteration:
@@ -420,8 +402,15 @@ def main_cotraining(args):
                 logger.info("Start epoch #{} (lr = {})...".format(epoch, lr))
                 running_loss_a = 0.0
                 running_loss_b = 0.0
+                if args.training_lang == 'EN':
+                    get_batch_fn = en_dataloader.get_training_batch_english
+                elif args.training_lang == 'CN':
+                    get_batch_fn = cn_dataloader.get_training_batch_chinese
+                else:
+                    raise NotImplementedError('This training language is not support')
+
                 for step, (batch_a, batch_b) in tqdm(enumerate(
-                    en_dataloader.get_training_batch_english(
+                    get_batch_fn(
                         args, co_training = True, p_list = p_list)),
                         total = args.num_iteration):
                     if step >= args.num_iteration:
@@ -712,6 +701,20 @@ def main_finetuning(args):
                     max_query_length=args.max_query_length,
                     is_training=True,
                     first_answer_only=True)
+        elif args.dataset_type == 'CMRC':
+            eval_examples, eval_dataset = CMRCProcessor.read_cmrc_examples(
+                    args.dev_file, is_training=True, 
+                    first_answer_only=True, 
+                    do_lower_case=True,
+                    remove_query_in_passage=False)
+            eval_features = CMRCProcessor.convert_chinese_examples_to_features(
+                        examples=eval_examples,
+                        tokenizer=tokenizer,
+                        max_seq_length=args.max_seq_length,
+                        doc_stride=args.doc_stride,
+                        max_query_length=args.max_query_length,
+                        is_training=True,
+                        first_answer_only=True)
         else:
             raise NotImplementedError("This dataset type is not supported")
 
@@ -751,6 +754,20 @@ def main_finetuning(args):
                     doc_stride=args.doc_stride,
                     max_query_length=args.max_query_length,
                     is_training=True)
+        elif args.dataset_type == "CRMC":
+            train_examples, _ = CMRCProcessor.read_cmrc_examples(
+                    args.train_file, is_training=True, 
+                    first_answer_only=True, 
+                    do_lower_case=True,
+                    remove_query_in_passage=False)
+            train_features = CMRCProcessor.convert_chinese_examples_to_features(
+                    examples=train_examples,
+                    tokenizer=tokenizer,
+                    max_seq_length=args.max_seq_length,
+                    doc_stride=args.doc_stride,
+                    max_query_length=args.max_query_length,
+                    is_training=True,
+                    first_answer_only=True)
         else:
             raise NotImplementedError("This dataset type is not supported")
 
@@ -876,6 +893,10 @@ def main_finetuning(args):
                                 result, _, _ = \
                                     SQuADEvaluator.evaluate(args, model, device, eval_dataset,
                                             eval_dataloader, eval_examples, eval_features)
+                            elif args.dataset_type == "CMRC":
+                                result, _, _ = \
+                                    MRQAEvaluator.evaluate(args, model, device, eval_dataset,
+                                            eval_dataloader, eval_examples, eval_features)
                             else:
                                 raise NotImplementedError("Dataset type is not supported.")
 
@@ -978,6 +999,7 @@ if __name__ == "__main__":
     parser.add_argument("--model", default="bert-base-chinese", type=str, required=True)
     parser.add_argument("--model_type", choices=MODEL_TYPES, type=str, required=True)
     parser.add_argument("--dataset_type", choices=DATASET_TYPES, type=str, required=True)
+    parser.add_argument("--training_lang", choices=LANG_TYPES, type=str, required=True)
     parser.add_argument("--tokenizer", default="bert-base-chinese", type=str, required=True)
     parser.add_argument("--output_dir", default=None, type=str, required=True,
                         help="The output directory where the model checkpoints and predictions will be written.")
