@@ -168,7 +168,7 @@ class InputFeatures(object):
 
 class BaseProcessor(object):
     def __init__(self):
-        self.logger = logging.getself.logger("__main__")
+        self.logger = logging.getLogger(__name__)
 
     @staticmethod
     def _improve_answer_span(doc_tokens, input_start, input_end, tokenizer,

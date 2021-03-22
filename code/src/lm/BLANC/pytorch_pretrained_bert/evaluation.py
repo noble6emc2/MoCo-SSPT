@@ -8,7 +8,7 @@ from .predictions import make_predictions
 from pytorch_pretrained_bert.tokenization import BasicTokenizer
 from mrqa_official_eval import exact_match_score, f1_score, metric_max_over_ground_truths
 
-logger = logging.getLogger('__main__')
+logger = logging.getLogger(__name__)
 RawResult = collections.namedtuple("RawResult",
                                    ["unique_id", "start_logits", "end_logits"])
 
