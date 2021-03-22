@@ -33,7 +33,6 @@ from torch.utils.data import DataLoader, TensorDataset
 from pytorch_pretrained_bert.file_utils import PYTORCH_PRETRAINED_BERT_CACHE
 from pytorch_pretrained_bert.file_utils import WEIGHTS_NAME, CONFIG_NAME
 from pytorch_pretrained_bert.blanc import BLANC, BertForQuestionAnswering
-from pytorch_pretrained_bert.predictions import make_predictions
 from pytorch_pretrained_bert.evaluation import MRQAEvaluator, SQuADEvaluator
 from pytorch_pretrained_bert.optimization import BertAdam, warmup_linear
 from pytorch_pretrained_bert.tokenization import BasicTokenizer, BertTokenizer, whitespace_tokenize

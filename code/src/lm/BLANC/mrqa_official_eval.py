@@ -115,6 +115,9 @@ def f1_en_score(prediction, ground_truth):
 def exact_match_score(prediction, ground_truth):
     return (normalize_answer(prediction) == normalize_answer(ground_truth))
 
+def exact_cn_match_score(prediction, ground_truth):
+    return (normalize_answer(prediction) == normalize_answer(ground_truth))
+
 def exact_en_match_score(prediction, ground_truth):
     return (normalize_en_answer(prediction) == normalize_en_answer(ground_truth))
 
