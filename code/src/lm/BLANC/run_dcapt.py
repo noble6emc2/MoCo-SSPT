@@ -1060,7 +1060,7 @@ if __name__ == "__main__":
     parser.add_argument('--num_iteration', type=int, default=9375)
     parser.add_argument('--lmb', type=float, default=0.5)
     parser.add_argument('--do_lower_case', type=bool, default=True)
-    #parser.add_argument('--remove_query_in_passage', type=bool, default=True)
+    parser.add_argument('--remove_query_in_passage', type=bool, default=True)
     parser.add_argument('--co_training_mode', type=str, default='data_cur')
     parser.add_argument('--enqueue_thread_num', type=int, default=4)
     parser.add_argument('--version_2_with_negative', type=bool, default=False)
