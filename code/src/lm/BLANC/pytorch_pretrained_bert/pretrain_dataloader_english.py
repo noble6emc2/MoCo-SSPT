@@ -4,7 +4,6 @@ import threading
 import numpy as np
 import torch
 import json
-import run_mrqa_blanc_pretraining_english as p_en
 from pytorch_pretrained_bert.dataset_processor import PretrainingProcessor, SQuADProcessor
 from pytorch_pretrained_bert.tokenization import BasicTokenizer, BertTokenizer
 from multiprocessing import Process, Queue
