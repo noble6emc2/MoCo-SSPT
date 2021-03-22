@@ -999,7 +999,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default="bert-base-chinese", type=str, required=True)
     parser.add_argument("--model_type", choices=MODEL_TYPES, type=str, required=True)
-    parser.add_argument("--dataset_type", choices=DATASET_TYPES, type=str, required=True)
+    parser.add_argument("--dataset_type", choices=DATASET_TYPES, type=str, default='MRQA')
     parser.add_argument("--training_lang", choices=LANG_TYPES, type=str, required=True)
     parser.add_argument("--command", choices=COMMANDS, type=str, required=True)
     parser.add_argument("--tokenizer", default="bert-base-chinese", type=str, required=True)
