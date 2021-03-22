@@ -6,7 +6,7 @@ import re
 import gzip
 import numpy as np
 import six
-from pytorch_pretrained_bert.tokenization import BasicTokenizer, BertTokenizer
+from pytorch_pretrained_bert.tokenization import BasicTokenizer, BertTokenizer, whitespace_tokenize
 from pytorch_pretrained_bert.tokenization import _is_punctuation, _is_whitespace, _is_control
 
 class SquadExample(object):
@@ -772,7 +772,7 @@ class MRQAProcessor(BaseProcessor):
         return self.read_mrqa_examples(*args, **kwargs)
 
     def convert_mrqa_examples_to_features(self, *args, **kwargs):
-        return self._convert_en_examples_to_features(*args, **kwargs)
+        return self._convert_examples_to_features(*args, **kwargs)
 
 
 class SQuADProcessor(BaseProcessor):
@@ -831,7 +831,7 @@ class SQuADProcessor(BaseProcessor):
                             cleaned_answer_text = " ".join(
                                 whitespace_tokenize(orig_answer_text))
                             if actual_text.find(cleaned_answer_text) == -1:
-                                logger.warning("Could not find answer: '%s' vs. '%s'",
+                                self.logger.warning("Could not find answer: '%s' vs. '%s'",
                                             actual_text, cleaned_answer_text)
                                 continue
                         else:
@@ -853,7 +853,7 @@ class SQuADProcessor(BaseProcessor):
                                 cleaned_answer_text = " ".join(
                                     whitespace_tokenize(orig_answer_text))
                                 if actual_text.find(cleaned_answer_text) == -1:
-                                    logger.warning("Could not find answer: '%s' vs. '%s'",
+                                    self.logger.warning("Could not find answer: '%s' vs. '%s'",
                                                 actual_text, cleaned_answer_text)
                                     continue
                                 start_positions.append(start_position)
