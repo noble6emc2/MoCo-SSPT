@@ -290,7 +290,7 @@ class BaseProcessor(object):
                     split_token_index = doc_span.start + i
                     token_to_orig_map[len(tokens)] = tok_to_orig_index[split_token_index]
 
-                    is_max_context = _check_is_max_context(doc_spans, doc_span_index,
+                    is_max_context = self._check_is_max_context(doc_spans, doc_span_index,
                                                         split_token_index)
                     token_is_max_context[len(tokens)] = is_max_context
                     tokens.append(all_doc_tokens[split_token_index])
