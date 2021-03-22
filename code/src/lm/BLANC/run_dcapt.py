@@ -34,12 +34,12 @@ from pytorch_pretrained_bert.file_utils import PYTORCH_PRETRAINED_BERT_CACHE
 from pytorch_pretrained_bert.file_utils import WEIGHTS_NAME, CONFIG_NAME
 from pytorch_pretrained_bert.blanc import BLANC, BertForQuestionAnswering
 from pytorch_pretrained_bert.predictions import make_predictions
-from pytorch_pretrained_bert.evaluation import MRQAEvaluator, SQuADEvaluator, CMRCProcessor
+from pytorch_pretrained_bert.evaluation import MRQAEvaluator, SQuADEvaluator
 from pytorch_pretrained_bert.optimization import BertAdam, warmup_linear
 from pytorch_pretrained_bert.tokenization import BasicTokenizer, BertTokenizer, whitespace_tokenize
 from pytorch_pretrained_bert.tokenization import _is_punctuation, _is_whitespace, _is_control
 from mrqa_official_eval import exact_en_match_score, f1_en_score, metric_max_over_ground_truths
-from pytorch_pretrained_bert.dataset_processor import MRQAProcessor, SQuADProcessor
+from pytorch_pretrained_bert.dataset_processor import MRQAProcessor, SQuADProcessor, CMRCProcessor
 
 PRED_FILE = "predictions.json"
 EVAL_FILE = "eval_results.txt"
