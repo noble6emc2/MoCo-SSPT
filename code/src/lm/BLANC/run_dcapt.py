@@ -47,6 +47,7 @@ TEST_FILE = "test_results.txt"
 MODEL_TYPES = ["BLANC", "BertForQA"]
 DATASET_TYPES = ["MRQA", "SQuAD", "CMRC"]
 LANG_TYPES = ['EN', 'CN']
+COMMANDS = ['finetuning', 'pretraining', 'cotraining', 'testing']
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
                     datefmt='%m/%d/%Y %H:%M:%S',
@@ -1000,6 +1001,7 @@ if __name__ == "__main__":
     parser.add_argument("--model_type", choices=MODEL_TYPES, type=str, required=True)
     parser.add_argument("--dataset_type", choices=DATASET_TYPES, type=str, required=True)
     parser.add_argument("--training_lang", choices=LANG_TYPES, type=str, required=True)
+    parser.add_argument("--command", choices=COMMANDS, type=str, required=True)
     parser.add_argument("--tokenizer", default="bert-base-chinese", type=str, required=True)
     parser.add_argument("--output_dir", default=None, type=str, required=True,
                         help="The output directory where the model checkpoints and predictions will be written.")
@@ -1061,9 +1063,6 @@ if __name__ == "__main__":
     #parser.add_argument('--remove_query_in_passage', type=bool, default=True)
     parser.add_argument('--co_training_mode', type=str, default='data_cur')
     parser.add_argument('--enqueue_thread_num', type=int, default=4)
-    parser.add_argument('--is_co_training', type=bool, default=False)
-    parser.add_argument('--is_finetuning', type=bool, default=False)
-    parser.add_argument('--is_model_testing', type=bool, default=False)
     parser.add_argument('--version_2_with_negative', type=bool, default=False)
     parser.add_argument('--debug', type=bool, default=False)
     parser.add_argument('--theta', type=float, default=0.8)
@@ -1075,18 +1074,19 @@ if __name__ == "__main__":
     args.output_dir_a = args.output_dir + "_a"
     args.output_dir_b = args.output_dir + "_b"
 
-    print('------is_co_training-----: %s' % args.is_co_training)
     print('------new_cotraining_optimizer-----: %s' % args.new_cotraining_optimizer)
 
-    if args.is_co_training:
+    if args.command == 'cotraining':
         logger.info('enter cotraining....')
         main_cotraining(args)
-    elif args.is_finetuning:
+    elif args.command == 'finetuning':
         logger.info('enter finetuning....')
         main_finetuning(args)
-    elif args.is_model_testing:
-        logger.info('enter model testing....')
+    elif args.command == 'testing':
+        logger.info('enter testing....')
         main_model_testing(args)
-    else:
-        logger.info('enter main....')
+    elif args.command == 'pretraining':
+        logger.info('enter pretraining....')
         main(args)
+    else:
+        raise NotImplementedError("This command is not supported")
