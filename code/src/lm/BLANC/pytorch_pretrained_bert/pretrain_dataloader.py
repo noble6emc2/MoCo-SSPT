@@ -175,7 +175,7 @@ def multi_process_get_training_data_queue_cn(args, start, end, p_list):
             if chunked_start > chunked_end else
             (np.random.rand() * (chunked_end - chunked_start) + chunked_start) % total_bytes)
         print("enqueue process started : ", i, offset, offset / total_bytes)
-        p = Process(target=enqueue, args=(q_list, offset, [(chunked_start, chunked_end)], i))
+        p = Process(target=enqueue, args=(q_list, offset, start_end_list, i))
         p.start()
         p_list.append(p)
 
