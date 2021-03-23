@@ -1,9 +1,10 @@
-import run_mrqa_blanc_pretraining_chinese as p_cn
 from pytorch_pretrained_bert.tokenization import BasicTokenizer, BertTokenizer
-import pretrain_dataloader_chinese as cn_dataloader
+import pytorch_pretrained_bert.pretrain_dataloader as dataloader
 import mrqa_official_eval as m_eval
 import argparse
 import unicodedata
+import random
+import numpy as np
 from collections import Counter
 if __name__ == "__main__":
     '''
@@ -37,12 +38,12 @@ if __name__ == "__main__":
             print(train_features[0])
             break
     '''
-    print(m_eval.f1_score("normalize_answer", "lize_answer"))
+    '''print(m_eval.f1_score("normalize_answer", "lize_answer"))
     print(m_eval.normalize_answer("oh adasa shoot").split())
     print(Counter("normalize_answer"))
     print(Counter("lize_answer"))
     print(Counter("normalize_answer") & Counter("lize_answer"))
-    input()
+    input()'''
     parser = argparse.ArgumentParser()
     parser.add_argument("--max_seq_length", default=384, type=int,
                             help="The maximum total input sequence length after WordPiece tokenization. Sequences "
@@ -56,7 +57,7 @@ if __name__ == "__main__":
     parser.add_argument('--do_lower_case', type=bool, default=True)
     parser.add_argument('--remove_query_in_passage', type=bool, default=True)
     parser.add_argument('--enqueue_thread_num', type=int, default=1)
-    parser.add_argument('--train_batch_size', type=int, default=8)
+    parser.add_argument('--train_batch_size', type=int, default=1)
     parser.add_argument('--window_size', type=int, default=5)
     parser.add_argument('--dataloader_offset', type=int, default=125000)
     parser.add_argument('--lmb', type=float, default=0.5)
@@ -65,7 +66,7 @@ if __name__ == "__main__":
     parser.add_argument('--model', type=str, default="bert-base-chinese")
     parser.add_argument('--tokenizer', type=str, default="bert-base-chinese")
     args = parser.parse_args()
-    for batch_a, batch_b in cn_dataloader.get_training_batch_chinese(args, co_training = True, p_list = []):
+    '''for batch_a, batch_b in cn_dataloader.get_training_batch_chinese(args, co_training = True, p_list = []):
         print(batch_a[0])
         print(batch_b[0])
         input('----')
@@ -95,9 +96,13 @@ if __name__ == "__main__":
     print(len(train_features))
     for i in train_features:
         print(i)
-        input("---------")
-    #for batch in cn_dataloader.get_training_batch_chinese(args, co_training = True):
-    #    input()
+        input("---------")'''
+    random.seed(0)
+    np.random.seed(0)    
+    p_list = []
+    for batch in dataloader.get_training_batch_chinese(args, co_training = True, p_list = p_list):
+        print(batch)
+        input()
     
     '''
     doc_tokens = []

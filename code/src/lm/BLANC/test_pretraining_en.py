@@ -1,10 +1,11 @@
-import run_mrqa_blanc_pretraining_english as p_en
-from pytorch_pretrained_bert.tokenization import BasicTokenizer, BertTokenizer
-import pretrain_dataloader_english as en_dataloader
+import pytorch_pretrained_bert.pretrain_dataloader as dataloader
 import mrqa_official_eval as m_eval
 import argparse
 import unicodedata
+import random
+import numpy as np
 from collections import Counter
+from pytorch_pretrained_bert.tokenization import BasicTokenizer, BertTokenizer
 if __name__ == "__main__":
     '''
 
@@ -55,9 +56,10 @@ if __name__ == "__main__":
                                 "be truncated to this length.")
     parser.add_argument('--do_lower_case', type=bool, default=True)
     parser.add_argument('--remove_query_in_passage', type=bool, default=True)
-    parser.add_argument('--enqueue_thread_num', type=int, default=1)
+    parser.add_argument('--enqueue_thread_num', type=int, default=2)
     parser.add_argument('--train_batch_size', type=int, default=8)
     parser.add_argument('--window_size', type=int, default=5)
+    parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--dataloader_offset', type=int, default=125000)
     parser.add_argument('--lmb', type=float, default=0.5)
     parser.add_argument('--train_file', type=str, 
@@ -78,7 +80,8 @@ if __name__ == "__main__":
                 remove_query_in_passage=False)
     print(len(examples))
     '''
-
+    random.seed(args.seed)
+    np.random.seed(args.seed)
     tokenizer = BertTokenizer.from_pretrained(
             "bert-base-uncased")
 
@@ -97,7 +100,7 @@ if __name__ == "__main__":
                 is_training=True,
                 first_answer_only=True)'''
 
-    with open('test_train_en.txt', 'r') as fin:
+    '''with open('test_train_en.txt', 'r') as fin:
         for line in fin:
             print(line)
             examples = p_en.read_english_examples(
@@ -123,9 +126,9 @@ if __name__ == "__main__":
                 first_answer_only=True)
 
             print(train_features[0])
-            input("----------------------------")
+            input("----------------------------")'''
 
-    for batch in en_dataloader.get_training_batch_english(args, co_training = False, p_list=[]):
+    for batch in dataloader.get_training_batch_english(args, co_training = False, p_list=[]):
         print(batch)
         input()
     

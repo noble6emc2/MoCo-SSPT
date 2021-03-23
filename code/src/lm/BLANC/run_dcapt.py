@@ -27,8 +27,7 @@ sys.path.append(os.path.dirname(__file__))
 import numpy as np
 import torch
 import datetime
-import pytorch_pretrained_bert.pretrain_dataloader_english as en_dataloader
-import pytorch_pretrained_bert.pretrain_dataloader_chinese as cn_dataloader
+import pytorch_pretrained_bert.pretrain_dataloader as dataloader
 from torch.utils.data import DataLoader, TensorDataset
 from pytorch_pretrained_bert.file_utils import PYTORCH_PRETRAINED_BERT_CACHE
 from pytorch_pretrained_bert.file_utils import WEIGHTS_NAME, CONFIG_NAME
@@ -167,9 +166,9 @@ def main(args):
                 logger.info("Start epoch #{} (lr = {})...".format(epoch, lr))
                 running_loss = 0.0
                 if args.training_lang == 'EN':
-                    get_batch_fn = en_dataloader.get_training_batch_english
+                    get_batch_fn = dataloader.get_training_batch_english
                 elif args.training_lang == 'CN':
-                    get_batch_fn = cn_dataloader.get_training_batch_chinese
+                    get_batch_fn = dataloader.get_training_batch_chinese
                 else:
                     raise NotImplementedError('This training language is not support')
 
@@ -403,9 +402,9 @@ def main_cotraining(args):
                 running_loss_a = 0.0
                 running_loss_b = 0.0
                 if args.training_lang == 'EN':
-                    get_batch_fn = en_dataloader.get_training_batch_english
+                    get_batch_fn = dataloader.get_training_batch_english
                 elif args.training_lang == 'CN':
-                    get_batch_fn = cn_dataloader.get_training_batch_chinese
+                    get_batch_fn = dataloader.get_training_batch_chinese
                 else:
                     raise NotImplementedError('This training language is not support')
 
