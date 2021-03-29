@@ -56,8 +56,8 @@ if __name__ == "__main__":
                                 "be truncated to this length.")
     parser.add_argument('--do_lower_case', type=bool, default=True)
     parser.add_argument('--remove_query_in_passage', type=bool, default=True)
-    parser.add_argument('--enqueue_thread_num', type=int, default=4)
-    parser.add_argument('--train_batch_size', type=int, default=256)
+    parser.add_argument('--enqueue_thread_num', type=int, default=1)
+    parser.add_argument('--train_batch_size', type=int, default=1)
     parser.add_argument('--window_size', type=int, default=5)
     parser.add_argument('--dataloader_offset', type=int, default=125000)
     parser.add_argument('--lmb', type=float, default=0.5)
@@ -100,7 +100,7 @@ if __name__ == "__main__":
     random.seed(0)
     np.random.seed(0)    
     p_list = []
-    for batch in dataloader.get_training_batch_chinese(args, co_training = True, p_list = p_list):
+    for batch in dataloader.get_training_batch_chinese(args, co_training = False, p_list = p_list):
         print(batch)
         input()
     

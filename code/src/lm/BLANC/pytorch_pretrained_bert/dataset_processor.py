@@ -6,6 +6,7 @@ import re
 import gzip
 import numpy as np
 import six
+import jieba
 from pytorch_pretrained_bert.tokenization import BasicTokenizer, BertTokenizer, whitespace_tokenize
 from pytorch_pretrained_bert.tokenization import _is_punctuation, _is_whitespace, _is_control
 
@@ -66,7 +67,7 @@ class MRQAExample(object):
                  qas_id,
                  question_text,
                  doc_tokens,
-                 #paragraph_text,
+                 paragraph_text,
                  orig_answer_text=None,
                  start_positions=None,
                  end_positions=None,
@@ -75,7 +76,7 @@ class MRQAExample(object):
                  is_impossible=None):
         self.qas_id = qas_id
         self.question_text = question_text
-        #self.paragraph_text = paragraph_text
+        self.paragraph_text = paragraph_text
         self.doc_tokens = doc_tokens
         self.orig_answer_text = orig_answer_text
         self.start_positions = start_positions
@@ -465,8 +466,8 @@ class PretrainingProcessor(BaseProcessor):
             for entry in article["paragraphs"]:
                 paragraph_text = entry["context"].strip()
                 raw_doc_tokens = self.tokenize_chinese(paragraph_text, 
-                        masking = None,
-                        do_lower_case= do_lower_case)
+                            masking = None,
+                            do_lower_case= do_lower_case)
                 doc_tokens = []
                 char_to_word_offset = []
                 prev_is_whitespace = True
@@ -559,7 +560,7 @@ class PretrainingProcessor(BaseProcessor):
                     example = MRQAExample(
                         qas_id=qas_id,
                         question_text=question_text, #question
-                        #paragraph_text=paragraph_text, # context text
+                        paragraph_text=paragraph_text, # context text
                         doc_tokens=doc_tokens, #passage text
                         orig_answer_text=orig_answer_text, # answer text
                         start_positions=start_positions, #answer start
@@ -683,7 +684,7 @@ class PretrainingProcessor(BaseProcessor):
             example = MRQAExample(
                 qas_id=qas_id,
                 question_text=question_text, #question
-                #paragraph_text=paragraph_text, # context text
+                paragraph_text=paragraph_text, # context text
                 doc_tokens=doc_tokens, #passage text
                 orig_answer_text=orig_answer_text, # answer text
                 start_positions=start_positions, #answer start
@@ -755,7 +756,7 @@ class MRQAProcessor(BaseProcessor):
                 example = MRQAExample(
                     qas_id=qas_id,
                     question_text=question_text, #question
-                    #paragraph_text=paragraph_text, # context text
+                    paragraph_text=paragraph_text, # context text
                     doc_tokens=doc_tokens, #passage text
                     orig_answer_text=orig_answer_text, # answer text
                     start_positions=start_position, #answer start
@@ -1193,7 +1194,7 @@ class CMRCProcessor(BaseProcessor):
                     example = MRQAExample(
                         qas_id=qas_id,
                         question_text=question_text, #question
-                        #paragraph_text=paragraph_text, # context text
+                        paragraph_text=paragraph_text, # context text
                         doc_tokens=doc_tokens, #passage text
                         orig_answer_text=orig_answer_text, # answer text
                         start_positions=start_positions, #answer start

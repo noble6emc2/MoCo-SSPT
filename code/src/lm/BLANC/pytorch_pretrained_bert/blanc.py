@@ -1202,7 +1202,8 @@ class BLANC(BertPreTrainedModel):
 
     def forward(self, input_ids, token_type_ids=None, attention_mask=None, 
             start_positions=None, end_positions=None, lmbs=None,
-            geometric_p=0.3, window_size=5, lmb=0.5, batch_idx_mask = None):
+            geometric_p=0.3, window_size=5, lmb=0.5, batch_idx_mask = None,
+            context_attention_mask=None):
         device = input_ids.device
         sequence_output, _ = self.bert(input_ids, token_type_ids, attention_mask, output_all_encoded_layers=False)
         bsize = sequence_output.size(0)
@@ -1228,9 +1229,14 @@ class BLANC(BertPreTrainedModel):
             epred[:,0:1], attention_e), dim=1)
         
         attention = attention_s * attention_e
-        
-        smoothed_attention = attention + 1.0
+        if lmbs is not None:
+            smoothed_attention = attention * context_attention_mask.view(bn, 1, 1) + 1.0
+        else:
+            smoothed_attention = attention + 1.0
+
+        #smoothed_attention = attention + 1.0
         sequence_output = sequence_output * smoothed_attention.view(bn, seq_len, 1)
+
 
         logits = self.qa_outputs(sequence_output)
         start_logits, end_logits = logits.split(1, dim=-1)

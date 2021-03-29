@@ -497,8 +497,11 @@ def main_cotraining(args):
                                 loss_a = torch.sum(loss_a) / torch.sum(mask_a)
                                 loss_b = torch.sum(loss_b) / torch.sum(mask_b)
                             else:
-                                loss_a, _, _ = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, lmbs=lmbs_a, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb, batch_idx_mask=None)
-                                loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, lmbs=lmbs_b, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb, batch_idx_mask=None)
+                                loss_a, _, _ = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, lmbs=lmbs_a, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb, batch_idx_mask=None,
+                                context_attention_mask = mask_a)
+                                loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, lmbs=lmbs_b, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb, batch_idx_mask=None,
+                                context_attention_mask = mask_b)
+
                         elif args.co_training_mode == 'data_cur':
                             top_k_index_a = set(np.argsort(lmb_list_a)[:math.ceil(args.theta * len(lmb_list_a))])
                             top_k_index_b = set(np.argsort(lmb_list_b)[:math.ceil(args.theta * len(lmb_list_b))])
