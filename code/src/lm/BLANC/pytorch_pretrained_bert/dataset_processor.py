@@ -6,7 +6,6 @@ import re
 import gzip
 import numpy as np
 import six
-import jieba
 from pytorch_pretrained_bert.tokenization import BasicTokenizer, BertTokenizer, whitespace_tokenize
 from pytorch_pretrained_bert.tokenization import _is_punctuation, _is_whitespace, _is_control
 
