@@ -1230,9 +1230,9 @@ class BLANC(BertPreTrainedModel):
         
         attention = attention_s * attention_e
         if lmbs is not None:
-            smoothed_attention = attention * context_attention_mask.view(bn, 1, 1) + 1.0
+            smoothed_attention = attention.view(bn, seq_len, 1) * context_attention_mask.view(bn, 1, 1) + 1.0
         else:
-            smoothed_attention = attention + 1.0
+            smoothed_attention = attention.view(bn, seq_len, 1) + 1.0
 
         #smoothed_attention = attention + 1.0
         sequence_output = sequence_output * smoothed_attention.view(bn, seq_len, 1)
