@@ -1,5 +1,5 @@
 from pytorch_pretrained_bert.tokenization import BasicTokenizer, BertTokenizer
-import pytorch_pretrained_bert.pretrain_dataloader as dataloader
+import pytorch_pretrained_bert.warmup_dataloader as warmup_dataloader
 import mrqa_official_eval as m_eval
 import argparse
 import unicodedata
@@ -58,11 +58,16 @@ if __name__ == "__main__":
     parser.add_argument('--remove_query_in_passage', type=bool, default=True)
     parser.add_argument('--enqueue_thread_num', type=int, default=1)
     parser.add_argument('--train_batch_size', type=int, default=1)
-    parser.add_argument('--window_size', type=int, default=5)
+    parser.add_argument('--jacc_thres', type=float, default=0.15)
+    parser.add_argument('--neg_drop_rate', type=float, default=0.1)
+    parser.add_argument('--window_size', type=int, default=10)
+    parser.add_argument('--warmup_window_size', type=int, default=8)
     parser.add_argument('--dataloader_offset', type=int, default=125000)
+    parser.add_argument('--max_warmup_query_length', type=int, default=40)
+    parser.add_argument('--max_comma_num', type=int, default=5)
     parser.add_argument('--lmb', type=float, default=0.5)
     parser.add_argument('--train_file', type=str, 
-        default="/Users/noble6emc2/Desktop/Tencent/BLANC/code/src/lm/BLANC/test_train.txt")
+        default="/Users/noble6emc2/Desktop/Tencent/BLANC/code/src/lm/BLANC/en_sspt_10000.json")
     parser.add_argument('--model', type=str, default="bert-base-chinese")
     parser.add_argument('--tokenizer', type=str, default="bert-base-chinese")
     args = parser.parse_args()
@@ -100,10 +105,11 @@ if __name__ == "__main__":
     random.seed(0)
     np.random.seed(0)    
     p_list = []
-    for batch in dataloader.get_training_batch_chinese(args, co_training = False, p_list = p_list):
-        print(batch)
-        input()
-    
+    from tqdm import tqdm
+    for batch in tqdm(
+        warmup_dataloader.get_warmup_training_batch_english(args, co_training = False, p_list = p_list)):
+        pass
+
     '''
     doc_tokens = []
     paragraph_text = "《纯情罗曼史》是一部由漫画家中村春菊所绘的BL漫画，后来被改编为广播剧、小说、电视动画以及游戏。与同为中村春菊所作之漫画「世界第一初恋」享有共同世界。《纯情罗曼史》内容分为三部分：此漫画的总销量目前己超过四百万册，在同类型的漫画作品里可说是异数。此系列的改编小说《纯爱罗曼史》和《自我中心纯爱》声称是「把漫画主角之一创作的妄想小说搬到现实来」的小说。生日:11月22日　血型：A型。 属性:傲娇受。同名电视动画于2007年宣布开始制作，于2008年4月开始播放。第二季电视动画则于2008年10月开始播放，片尾插图由中村春菊担任，动画风景制作则使用实景照片。相隔6年之后，于2014年7月宣布决定制作第3季，预定2015年7月开始播放。"
