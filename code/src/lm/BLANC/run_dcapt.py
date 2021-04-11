@@ -1105,6 +1105,10 @@ if __name__ == "__main__":
     parser.add_argument('--moving_loss_num', type=int, default=8)
     parser.add_argument('--new_cotraining_optimizer', type=bool, default=False)
     parser.add_argument('--is_idx_mask', type=bool, default=False)
+    parser.add_argument('--jacc_thres', type=float, default=0.2)
+    parser.add_argument('--neg_drop_rate', type=float, default=0.4)
+    parser.add_argument('--max_warmup_query_length', type=int, default=40)
+    parser.add_argument('--max_comma_num', type=int, default=5)
     args = parser.parse_args()
     args.output_dir_a = args.output_dir + "_a"
     args.output_dir_b = args.output_dir + "_b"
