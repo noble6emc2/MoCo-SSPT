@@ -161,7 +161,7 @@ def multi_process_get_warmup_data_queue_cn(args, start, end, p_list):
 
             
     def enqueue(q_list, offset, start_end_list, process_num, stopwords,
-        loop = False):
+        loop = True):
         print("train file offset: ", offset)
         fi = open(args.train_file, 'rb')
         cache = [None] * 10000
@@ -296,7 +296,7 @@ def multi_process_get_warmup_data_queue_cn(args, start, end, p_list):
             if chunked_start > chunked_end else
             (np.random.rand() * (chunked_end - chunked_start) + chunked_start) % total_bytes)
         print("enqueue process started : ", i, offset, offset / total_bytes)
-        p = Process(target=enqueue, args=(q_list, offset, start_end_list, i, stopwords('zh')))
+        p = Process(target=enqueue, args=(q_list, offset, start_end_list, i, stopwords('zh'), True))
         p.start()
         p_list.append(p)
 
@@ -424,7 +424,7 @@ def multi_process_get_warmup_data_queue_en(args, start, end, p_list):
 
 
     def enqueue(q_list, offset, start_end_list, process_num, stopwords,
-        loop= False):
+        loop= True):
         from nltk.stem import WordNetLemmatizer
         print("train file offset: ", offset)
         fi = open(args.train_file, 'rb')
@@ -568,7 +568,7 @@ def multi_process_get_warmup_data_queue_en(args, start, end, p_list):
             if chunked_start > chunked_end else
             (np.random.rand() * (chunked_end - chunked_start) + chunked_start) % total_bytes)
         print("enqueue process started : ", i, offset, offset / total_bytes)
-        p = Process(target=enqueue, args=(q_list, offset, start_end_list, i, stopwords('en'), False))
+        p = Process(target=enqueue, args=(q_list, offset, start_end_list, i, stopwords('en'), True))
         p.start()
         p_list.append(p)
 
@@ -597,7 +597,7 @@ def get_warmup_training_batch_chinese(args, co_training: bool, p_list: list):
     batch_indicator = 0
     q_ptr = 0
     isfinished_set = set()
-    fout = open('/Users/noble6emc2/Desktop/Tencent/BLANC/code/src/lm/BLANC/filter_10000.json', 'w', encoding = 'utf-8')
+    #fout = open('/Users/noble6emc2/Desktop/Tencent/BLANC/code/src/lm/BLANC/filter_10000.json', 'w', encoding = 'utf-8')
     while True:
         if len(isfinished_set) == args.enqueue_thread_num:
             print("get_batch finished")
@@ -626,8 +626,8 @@ def get_warmup_training_batch_chinese(args, co_training: bool, p_list: list):
         print('===================')
         print(q_b_res['example'])
         print(q_b_res['context_tok_set'])'''
-        fout.write(json.dumps(q_a_res['example'], ensure_ascii = False) + '\n')
-        fout.write(json.dumps(q_b_res['example'], ensure_ascii = False) + '\n')
+        #fout.write(json.dumps(q_a_res['example'], ensure_ascii = False) + '\n')
+        #fout.write(json.dumps(q_b_res['example'], ensure_ascii = False) + '\n')
 
         new_feature_a = q_a_res['feature']
         new_feature_b = q_b_res['feature']
@@ -690,7 +690,7 @@ def get_warmup_training_batch_english(args, co_training: bool, p_list: list):
     batch_indicator = 0
     q_ptr = 0
     isfinished_set = set()
-    fout = open('/Users/noble6emc2/Desktop/Tencent/BLANC/code/src/lm/BLANC/filter_10000_en_sspt.json', 'w', encoding = 'utf-8')
+    #fout = open('/Users/noble6emc2/Desktop/Tencent/BLANC/code/src/lm/BLANC/filter_10000_en_sspt.json', 'w', encoding = 'utf-8')
     while True:
         if len(isfinished_set) == args.enqueue_thread_num:
             print("get_batch finished")
@@ -719,8 +719,8 @@ def get_warmup_training_batch_english(args, co_training: bool, p_list: list):
         print('===================')
         print(q_b_res['example'])
         print(q_b_res['context_tok_set'])'''
-        fout.write(json.dumps(q_a_res['example'], ensure_ascii = False) + '\n')
-        fout.write(json.dumps(q_b_res['example'], ensure_ascii = False) + '\n')
+        '''fout.write(json.dumps(q_a_res['example'], ensure_ascii = False) + '\n')
+        fout.write(json.dumps(q_b_res['example'], ensure_ascii = False) + '\n')'''
 
         new_feature_a = q_a_res['feature']
         new_feature_b = q_b_res['feature']

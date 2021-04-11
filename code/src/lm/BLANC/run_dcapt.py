@@ -28,6 +28,7 @@ import numpy as np
 import torch
 import datetime
 import pytorch_pretrained_bert.pretrain_dataloader as dataloader
+import pytorch_pretrained_bert.warmup_dataloader as warmup_dataloader
 from torch.utils.data import DataLoader, TensorDataset
 from pytorch_pretrained_bert.file_utils import PYTORCH_PRETRAINED_BERT_CACHE
 from pytorch_pretrained_bert.file_utils import WEIGHTS_NAME, CONFIG_NAME
@@ -396,6 +397,7 @@ def main_cotraining(args):
             lmb_window_list_b = []
             from tqdm import tqdm
             p_list = []
+            warmup_p_list = []
             first_in_cotraining = True
             for epoch in range(int(args.num_train_epochs)):
                 logger.info("Start epoch #{} (lr = {})...".format(epoch, lr))
@@ -403,32 +405,61 @@ def main_cotraining(args):
                 running_loss_b = 0.0
                 if args.training_lang == 'EN':
                     get_batch_fn = dataloader.get_training_batch_english
+                    get_warmup_batch_fn = warmup_dataloader.get_warmup_training_batch_english
                 elif args.training_lang == 'CN':
                     get_batch_fn = dataloader.get_training_batch_chinese
+                    get_warmup_batch_fn = warmup_dataloader.get_warmup_training_batch_chinese
                 else:
                     raise NotImplementedError('This training language is not support')
 
-                for step, (batch_a, batch_b) in tqdm(enumerate(
-                    get_batch_fn(
-                        args, co_training = True, p_list = p_list)),
-                        total = args.num_iteration):
+                if args.warmup_dataloader:
+                    dataloader_iterator = enumerate(
+                        zip(get_batch_fn(
+                            args, co_training = True, p_list = p_list),
+                            get_warmup_batch_fn(
+                            args, co_training = True, p_list = warmup_p_list)
+                            )
+                    )
+                else:
+                    dataloader_iterator = enumerate(
+                        get_batch_fn(
+                            args, co_training = True, p_list = p_list)
+                    )
+
+                for step, data_batch in tqdm(
+                    dataloader_iterator,
+                    total = args.num_iteration):
                     if step >= args.num_iteration:
                         for p in p_list:
                             if p.is_alive:
                                 p.terminate()
                                 p.join()
 
+                        for p in warmup_p_list:
+                            if p.is_alive:
+                                p.terminate()
+                                p.join()
+
                         break
+
+                    if args.warmup_dataloader:
+                        (batch_a, batch_b), (warmup_batch_a, warmup_batch_b) = data_batch
+                    else:
+                        batch_a, batch_b = data_batch
+                        warmup_batch_a = batch_a
+                        warmup_batch_b = batch_b
 
                     if n_gpu == 1:
                         batch_a = tuple(t.to(device) for t in batch_a)
                         batch_b = tuple(t.to(device) for t in batch_b)
+                        warmup_batch_a = tuple(t.to(device) for t in warmup_batch_a)
+                        warmup_batch_b = tuple(t.to(device) for t in warmup_batch_b)
 
                     step_ratio = global_step / num_train_optimization_steps
                     #Warm up in order to make Model A/B's hypothesis different
-                    input_ids_a, input_mask_a, segment_ids_a, start_positions_a, end_positions_a = batch_a
-                    input_ids_b, input_mask_b, segment_ids_b, start_positions_b, end_positions_b = batch_b
                     if global_step < max_warmup_step:
+                        input_ids_a, input_mask_a, segment_ids_a, start_positions_a, end_positions_a = warmup_batch_a
+                        input_ids_b, input_mask_b, segment_ids_b, start_positions_b, end_positions_b = warmup_batch_b
                         # warming up stage
                         model_a.train()
                         model_b.train()
@@ -437,6 +468,8 @@ def main_cotraining(args):
                         loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
                     else:
                         # co-training stage
+                        input_ids_a, input_mask_a, segment_ids_a, start_positions_a, end_positions_a = batch_a
+                        input_ids_b, input_mask_b, segment_ids_b, start_positions_b, end_positions_b = batch_b
                         if args.new_cotraining_optimizer and first_in_cotraining:
                             logger.info("creating new optimizer for cotraining...")
                             optimizer_a, optimizer_b = create_optimizer(model_a, 
@@ -1065,6 +1098,7 @@ if __name__ == "__main__":
     parser.add_argument('--co_training_mode', type=str, default='data_cur')
     parser.add_argument('--enqueue_thread_num', type=int, default=4)
     parser.add_argument('--version_2_with_negative', type=bool, default=False)
+    parser.add_argument('--warmup_dataloader', type=bool, default=False)
     parser.add_argument('--debug', type=bool, default=False)
     parser.add_argument('--theta', type=float, default=0.8)
     parser.add_argument('--moving_loss_warmup_ratio', type=float, default=0.3)

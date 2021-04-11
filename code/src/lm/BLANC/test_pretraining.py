@@ -1,5 +1,6 @@
 from pytorch_pretrained_bert.tokenization import BasicTokenizer, BertTokenizer
 import pytorch_pretrained_bert.warmup_dataloader as warmup_dataloader
+import pytorch_pretrained_bert.pretrain_dataloader as dataloader
 import mrqa_official_eval as m_eval
 import argparse
 import unicodedata
@@ -58,8 +59,8 @@ if __name__ == "__main__":
     parser.add_argument('--remove_query_in_passage', type=bool, default=True)
     parser.add_argument('--enqueue_thread_num', type=int, default=1)
     parser.add_argument('--train_batch_size', type=int, default=1)
-    parser.add_argument('--jacc_thres', type=float, default=0.15)
-    parser.add_argument('--neg_drop_rate', type=float, default=0.1)
+    parser.add_argument('--jacc_thres', type=float, default=0.2)
+    parser.add_argument('--neg_drop_rate', type=float, default=0.4)
     parser.add_argument('--window_size', type=int, default=10)
     parser.add_argument('--warmup_window_size', type=int, default=8)
     parser.add_argument('--dataloader_offset', type=int, default=125000)
@@ -103,12 +104,21 @@ if __name__ == "__main__":
         print(i)
         input("---------")'''
     random.seed(0)
-    np.random.seed(0)    
+    np.random.seed(0)
+    warmup_p_list = []
     p_list = []
     from tqdm import tqdm
-    for batch in tqdm(
-        warmup_dataloader.get_warmup_training_batch_english(args, co_training = False, p_list = p_list)):
-        pass
+    for idx, (batch_a, batch_b) in tqdm(
+        enumerate(
+            zip(
+                warmup_dataloader.get_warmup_training_batch_english(args, co_training = False, p_list = warmup_p_list),
+                dataloader.get_training_batch_english(args, co_training = False, p_list = p_list),
+                )
+            )
+        ):
+        print(batch_a)
+        print(batch_b)
+        input()
 
     '''
     doc_tokens = []
