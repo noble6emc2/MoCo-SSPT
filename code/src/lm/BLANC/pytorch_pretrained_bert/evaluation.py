@@ -794,14 +794,14 @@ class SQuADEvaluator:
         return new_scores
 
     @staticmethod
-    def make_eval_dict(exact_scores, f1_scores, precision={}, recall = {}, span_exact={}, span_f1={}, span_p={}, span_r={}, qid_list=None):
+    def make_eval_dict(exact_scores, f1_scores, p_scores={}, r_scores={}, span_exact={}, span_f1={}, span_p={}, span_r={}, qid_list=None):
         if not qid_list:
             total = len(exact_scores)
             return collections.OrderedDict([
                 ('exact', 100.0 * sum(exact_scores.values()) / total),
                 ('f1', 100.0 * sum(f1_scores.values()) / total),
-                ('precision', 100.0 * sum(precision.values()) / total),
-                ('recall', 100.0 * sum(recall.values()) / total),
+                ('precision', 100.0 * sum(p_scores.values()) / total),
+                ('recall', 100.0 * sum(r_scores.values()) / total),
                 ('span_exact', 100.0 * sum(span_exact.values()) / total),
                 ('span_f1', 100.0 * sum(span_f1.values()) / total),
                 ('span_precision', 100.0 * sum(span_p.values()) / total),
@@ -813,8 +813,8 @@ class SQuADEvaluator:
             return collections.OrderedDict([
                 ('exact', 100.0 * sum(exact_scores[k] for k in qid_list) / total),
                 ('f1', 100.0 * sum(f1_scores[k] for k in qid_list) / total),
-                ('precision', 100.0 * sum(precision_scores[k] for k in qid_list) / total),
-                ('recall', 100.0 * sum(recall_scores[k] for k in qid_list) / total),
+                ('precision', 100.0 * sum(p_scores.values()) / total),
+                ('recall', 100.0 * sum(r_scores.values()) / total),
                 ('span_exact', 100.0 * sum(span_exact.values()) / total),
                 ('span_f1', 100.0 * sum(span_f1.values()) / total),
                 ('span_precision', 100.0 * sum(span_p.values()) / total),
