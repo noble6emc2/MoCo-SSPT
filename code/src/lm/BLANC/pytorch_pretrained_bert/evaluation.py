@@ -2,6 +2,7 @@ import torch
 import collections
 import logging
 import math
+import time
 import re
 import string
 from pytorch_pretrained_bert.tokenization import BasicTokenizer
@@ -860,17 +861,18 @@ class SQuADEvaluator:
 
     @staticmethod
     def evaluate(args, model, device, eval_dataset, eval_dataloader,
-                eval_examples, eval_features, verbose=True):
+             eval_examples, eval_features, na_prob_thresh=1.0, pred_only=False):
         all_results = []
         model.eval()
-        for input_ids, input_mask, segment_ids, example_indices in eval_dataloader:
-            if len(all_results) % 1000 == 0:
-                logger.info("Processing example: %d" % (len(all_results)))
+        eval_time_s = time.time()
+        for idx, (input_ids, input_mask, segment_ids, example_indices) in enumerate(eval_dataloader):
+            if idx % 10 == 0:
+                logger.info("Running test: %d / %d" % (idx, len(eval_dataloader)))
             input_ids = input_ids.to(device)
             input_mask = input_mask.to(device)
             segment_ids = segment_ids.to(device)
             with torch.no_grad():
-                batch_start_logits, batch_end_logits, _ = model(input_ids, token_type_ids=segment_ids, attention_mask=input_mask, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+                batch_start_logits, batch_end_logits, _ = model(input_ids, segment_ids, input_mask, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
             for i, example_index in enumerate(example_indices):
                 start_logits = batch_start_logits[i].detach().cpu().tolist()
                 end_logits = batch_end_logits[i].detach().cpu().tolist()
@@ -879,18 +881,45 @@ class SQuADEvaluator:
                 all_results.append(RawResult(unique_id=unique_id,
                                             start_logits=start_logits,
                                             end_logits=end_logits))
+        eval_time_e = time.time()
 
-        preds, nbest_preds = \
+        preds, nbest_preds, na_probs = \
             SQuADEvaluator.make_predictions(eval_examples, eval_features, all_results,
                             args.n_best_size, args.max_answer_length,
-                            args.do_lower_case, args.verbose_logging)
+                            args.do_lower_case, args.verbose_logging,
+                            args.version_2_with_negative)
         
-        exact_raw, f1_raw, precision, recall, span_exact, span_f1, span_p, span_r = SQuADEvaluator.get_raw_scores(eval_dataset, preds, eval_examples)
-        result = SQuADEvaluator.make_eval_dict(exact_raw, f1_raw, precision=precision, recall=recall, span_exact=span_exact, span_f1=span_f1, span_p=span_p, span_r=span_r)
-        
-        if verbose:
-            logger.info("***** Eval results *****")
-            for key in sorted(result.keys()):
-                logger.info("  %s = %s", key, str(result[key]))
+        if pred_only:
+            if args.version_2_with_negative:
+                for k in preds:
+                    if na_probs[k] > na_prob_thresh:
+                        preds[k] = ''
+            return {}, preds, nbest_preds
 
+        if args.version_2_with_negative:
+            qid_to_has_ans = SQuADEvaluator.make_qid_to_has_ans(eval_dataset)
+            has_ans_qids = [k for k, v in qid_to_has_ans.items() if v]
+            no_ans_qids = [k for k, v in qid_to_has_ans.items() if not v]
+            exact_raw, f1_raw, _, _, span_exact, span_f1, span_p, span_r = SQuADEvaluator.get_raw_scores(eval_dataset, preds, eval_examples)
+            exact_thresh = SQuADEvaluator.apply_no_ans_threshold(exact_raw, na_probs, qid_to_has_ans, na_prob_thresh)
+            f1_thresh = SQuADEvaluator.apply_no_ans_threshold(f1_raw, na_probs, qid_to_has_ans, na_prob_thresh)
+            result = SQuADEvaluator.make_eval_dict(exact_thresh, f1_thresh)
+            if has_ans_qids:
+                has_ans_eval = SQuADEvaluator.make_eval_dict(exact_thresh, f1_thresh, qid_list=has_ans_qids)
+                SQuADEvaluator.merge_eval(result, has_ans_eval, 'HasAns')
+            if no_ans_qids:
+                no_ans_eval = SQuADEvaluator.make_eval_dict(exact_thresh, f1_thresh, qid_list=no_ans_qids)
+                SQuADEvaluator.merge_eval(result, no_ans_eval, 'NoAns')
+            SQuADEvaluator.find_all_best_thresh(result, preds, exact_raw, f1_raw, na_probs, qid_to_has_ans)
+            for k in preds:
+                if na_probs[k] > result['best_f1_thresh']:
+                    preds[k] = {}
+        else:
+            exact_raw, f1_raw, p_raw, r_raw, span_exact, span_f1, span_p, span_r = SQuADEvaluator.get_raw_scores(eval_dataset, preds, eval_examples)
+            result = SQuADEvaluator.make_eval_dict(exact_raw, f1_raw, p_scores=p_raw, r_scores=r_raw, span_exact=span_exact, span_f1=span_f1, span_p=span_p, span_r=span_r)
+        
+        logger.info("***** Eval results *****")
+        for key in sorted(result.keys()):
+            logger.info("  %s = %s", key, str(result[key]))
+        logger.info("Eval time: {:.06f}".format(eval_time_e - eval_time_s))
         return result, preds, nbest_preds
