@@ -712,7 +712,7 @@ def main_finetuning(args):
             eval_examples = data_processor.read_squad_examples(
                 input_file=args.dev_file, is_training=False,
                 version_2_with_negative=args.version_2_with_negative)
-            eval_features = data_processor.convert_english_examples_to_features(
+            eval_features = data_processor.convert_squad_examples_to_features(
                 examples=eval_examples,
                 tokenizer=tokenizer,
                 max_seq_length=args.max_seq_length,
