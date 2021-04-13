@@ -833,9 +833,15 @@ def main_finetuning(args):
         best_result = None
         lrs = [args.learning_rate] if args.learning_rate else [1e-6, 2e-6, 3e-6, 5e-6, 1e-5, 2e-5, 3e-5, 5e-5]
         for lr in lrs:
-            assert args.model_type in MODEL_TYPES
-            model, pretrained_weights = BLANC.from_pretrained(
-                args.model, cache_dir=PYTORCH_PRETRAINED_BERT_CACHE)
+            if args.model_type == "BLANC":
+                model, pretrained_weights = BLANC.from_pretrained(
+                    args.model, cache_dir=PYTORCH_PRETRAINED_BERT_CACHE)
+            elif args.model_type == "BertForQA":
+                model, pretrained_weights = BertForQuestionAnswering.from_pretrained(
+                    args.model, cache_dir=PYTORCH_PRETRAINED_BERT_CACHE)
+            else:
+                raise NotImplementedError("Unknown Model Type")
+                
             if args.fp16:
                 model.half()
             model.to(device)
