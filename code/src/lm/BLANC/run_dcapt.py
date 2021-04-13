@@ -708,10 +708,11 @@ def main_finetuning(args):
                 dataset_json = json.load(f)
 
             eval_dataset = dataset_json['data']
-            eval_examples = SQuADProcessor.read_squad_examples(
+            data_processor = SQuADProcessor()
+            eval_examples = data_processor.read_squad_examples(
                 input_file=args.dev_file, is_training=False,
                 version_2_with_negative=args.version_2_with_negative)
-            eval_features = SQuADProcessor.convert_english_examples_to_features(
+            eval_features = data_processor.convert_english_examples_to_features(
                 examples=eval_examples,
                 tokenizer=tokenizer,
                 max_seq_length=args.max_seq_length,
@@ -723,12 +724,13 @@ def main_finetuning(args):
                 content = reader.read().decode('utf-8').strip().split('\n')[1:]
                 eval_dataset = [json.loads(line) for line in content]
 
-            eval_examples = MRQAProcessor.read_mrqa_examples(
+            data_processor = MRQAProcessor()
+            eval_examples = data_processor.read_mrqa_examples(
                     args.dev_file, is_training=True, 
                     first_answer_only=True, 
                     do_lower_case=True,
                     remove_query_in_passage=False)
-            eval_features = MRQAProcessor.convert_english_examples_to_features(
+            eval_features = data_processor.convert_english_examples_to_features(
                     examples=eval_examples,
                     tokenizer=tokenizer,
                     max_seq_length=args.max_seq_length,
@@ -737,12 +739,13 @@ def main_finetuning(args):
                     is_training=True,
                     first_answer_only=True)
         elif args.dataset_type == 'CMRC':
-            eval_examples, eval_dataset = CMRCProcessor.read_cmrc_examples(
+            data_processor = CMRCProcessor()
+            eval_examples, eval_dataset = data_processor.read_cmrc_examples(
                     args.dev_file, is_training=True, 
                     first_answer_only=True, 
                     do_lower_case=True,
                     remove_query_in_passage=False)
-            eval_features = CMRCProcessor.convert_chinese_examples_to_features(
+            eval_features = data_processor.convert_chinese_examples_to_features(
                         examples=eval_examples,
                         tokenizer=tokenizer,
                         max_seq_length=args.max_seq_length,
@@ -841,7 +844,7 @@ def main_finetuning(args):
                     args.model, cache_dir=PYTORCH_PRETRAINED_BERT_CACHE)
             else:
                 raise NotImplementedError("Unknown Model Type")
-                
+
             if args.fp16:
                 model.half()
             model.to(device)
