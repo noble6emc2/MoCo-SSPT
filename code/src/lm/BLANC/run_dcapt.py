@@ -769,12 +769,13 @@ def main_finetuning(args):
 
     if args.do_train:
         if args.dataset_type == "MRQA":
-            train_examples = MRQAProcessor.read_mrqa_examples(
+            data_processor = MRQAProcessor()
+            train_examples = data_processor.read_mrqa_examples(
                     args.train_file, is_training=True, 
                     first_answer_only=True, 
                     do_lower_case=True,
                     remove_query_in_passage=False)
-            train_features = MRQAProcessor.convert_english_examples_to_features(
+            train_features = data_processor.convert_english_examples_to_features(
                     examples=train_examples,
                     tokenizer=tokenizer,
                     max_seq_length=args.max_seq_length,
@@ -783,9 +784,10 @@ def main_finetuning(args):
                     is_training=True,
                     first_answer_only=True)
         elif args.dataset_type == "SQuAD":
-            train_examples = SQuADProcessor.read_squad_examples(
+            data_processor = SQuADProcessor()
+            train_examples = data_processor.read_squad_examples(
                     input_file=args.train_file, is_training=True, version_2_with_negative=args.version_2_with_negative)
-            train_features = SQuADProcessor.convert_english_examples_to_features(
+            train_features = data_processor.convert_english_examples_to_features(
                     examples=train_examples,
                     tokenizer=tokenizer,
                     max_seq_length=args.max_seq_length,
@@ -793,12 +795,13 @@ def main_finetuning(args):
                     max_query_length=args.max_query_length,
                     is_training=True)
         elif args.dataset_type == "CRMC":
-            train_examples, _ = CMRCProcessor.read_cmrc_examples(
+            data_processor = CMRCProcessor()
+            train_examples, _ = data_processor.read_cmrc_examples(
                     args.train_file, is_training=True, 
                     first_answer_only=True, 
                     do_lower_case=True,
                     remove_query_in_passage=False)
-            train_features = CMRCProcessor.convert_chinese_examples_to_features(
+            train_features = data_processor.convert_chinese_examples_to_features(
                     examples=train_examples,
                     tokenizer=tokenizer,
                     max_seq_length=args.max_seq_length,
