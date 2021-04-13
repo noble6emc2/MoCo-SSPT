@@ -32,8 +32,8 @@ class MRQAEvaluator:
             prelim_predictions = []
             for (feature_index, feature) in enumerate(features):
                 result = unique_id_to_result[feature.unique_id]
-                start_indexes = _get_best_indexes(result.start_logits, n_best_size)
-                end_indexes = _get_best_indexes(result.end_logits, n_best_size)
+                start_indexes = MRQAEvaluator._get_best_indexes(result.start_logits, n_best_size)
+                end_indexes = MRQAEvaluator._get_best_indexes(result.end_logits, n_best_size)
                 for start_index in start_indexes:
                     for end_index in end_indexes:
                         if start_index >= len(feature.tokens):
@@ -82,7 +82,7 @@ class MRQAEvaluator:
                     tok_text = tok_text.strip()
                     tok_text = " ".join(tok_text.split())
                     orig_text = " ".join(orig_tokens)
-                    final_text = get_final_text(tok_text, orig_text, do_lower_case, verbose_logging)
+                    final_text = MRQAEvaluator.get_final_text(tok_text, orig_text, do_lower_case, verbose_logging)
                     if final_text in seen_predictions:
                         continue
                     seen_predictions[final_text] = True
@@ -118,7 +118,7 @@ class MRQAEvaluator:
             target_entry["start_index"] = best_non_null_entry.start_index
             target_entry["end_index"] = best_non_null_entry.end_index
             
-            probs = _compute_softmax(total_scores)
+            probs = MRQAEvaluator._compute_softmax(total_scores)
             nbest_json = []
             for (i, entry) in enumerate(nbest):
                 output = collections.OrderedDict()
@@ -361,12 +361,12 @@ class MRQAEvaluator:
                                             end_logits=end_logits))
 
         preds, nbest_preds = \
-            make_predictions(eval_examples, eval_features, all_results,
+            MRQAEvaluator.make_predictions(eval_examples, eval_features, all_results,
                             args.n_best_size, args.max_answer_length,
                             args.do_lower_case, args.verbose_logging)
         
-        exact_raw, f1_raw, precision, recall, span_exact, span_f1, span_p, span_r = get_raw_scores(eval_dataset, preds, eval_examples)
-        result = make_eval_dict(exact_raw, f1_raw, precision=precision, recall=recall, span_exact=span_exact, span_f1=span_f1, span_p=span_p, span_r=span_r)
+        exact_raw, f1_raw, precision, recall, span_exact, span_f1, span_p, span_r = MRQAEvaluator.get_raw_scores(eval_dataset, preds, eval_examples)
+        result = MRQAEvaluator.make_eval_dict(exact_raw, f1_raw, precision=precision, recall=recall, span_exact=span_exact, span_f1=span_f1, span_p=span_p, span_r=span_r)
         
         if verbose:
             logger.info("***** Eval results *****")
@@ -403,8 +403,8 @@ class SQuADEvaluator:
             null_end_logit = 0
             for (feature_index, feature) in enumerate(features):
                 result = unique_id_to_result[feature.unique_id]
-                start_indexes = _get_best_indexes(result.start_logits, n_best_size)
-                end_indexes = _get_best_indexes(result.end_logits, n_best_size)
+                start_indexes = SQuADEvaluator._get_best_indexes(result.start_logits, n_best_size)
+                end_indexes = SQuADEvaluator._get_best_indexes(result.end_logits, n_best_size)
                 if version_2_with_negative:
                     feature_null_score = result.start_logits[0] + result.end_logits[0]
                     if feature_null_score < score_null:
@@ -470,7 +470,7 @@ class SQuADEvaluator:
                     tok_text = tok_text.strip()
                     tok_text = " ".join(tok_text.split())
                     orig_text = " ".join(orig_tokens)
-                    final_text = get_final_text(tok_text, orig_text, do_lower_case, verbose_logging)
+                    final_text = SQuADEvaluator.get_final_text(tok_text, orig_text, do_lower_case, verbose_logging)
                     if final_text in seen_predictions:
                         continue
                     seen_predictions[final_text] = True
@@ -517,7 +517,7 @@ class SQuADEvaluator:
             target_entry["start_index"] = best_non_null_entry.start_index
             target_entry["end_index"] = best_non_null_entry.end_index
             
-            probs = _compute_softmax(total_scores)
+            probs = SQuADEvaluator._compute_softmax(total_scores)
             nbest_json = []
             for (i, entry) in enumerate(nbest):
                 output = collections.OrderedDict()
@@ -670,16 +670,16 @@ class SQuADEvaluator:
     def get_tokens(s):
         if not s:
             return []
-        return normalize_answer(s).split()
+        return SQuADEvaluator.normalize_answer(s).split()
 
     @staticmethod
     def compute_exact(a_gold, a_pred):
-        return int(normalize_answer(a_gold) == normalize_answer(a_pred))
+        return int(SQuADEvaluator.normalize_answer(a_gold) == SQuADEvaluator.normalize_answer(a_pred))
 
     @staticmethod
     def compute_f1(a_gold, a_pred):
-        gold_toks = get_tokens(a_gold)
-        pred_toks = get_tokens(a_pred)
+        gold_toks = SQuADEvaluator.get_tokens(a_gold)
+        pred_toks = SQuADEvaluator.get_tokens(a_pred)
         common = collections.Counter(gold_toks) & collections.Counter(pred_toks)
         num_same = sum(common.values())
         if len(gold_toks) == 0 or len(pred_toks) == 0:
@@ -702,15 +702,15 @@ class SQuADEvaluator:
             for p in article['paragraphs']:
                 for qa in p['qas']:
                     qid = qa['id']
-                    gold_answers = [a['text'] for a in qa['answers'] if normalize_answer(a['text'])]
+                    gold_answers = [a['text'] for a in qa['answers'] if SQuADEvaluator.normalize_answer(a['text'])]
                     if not gold_answers:
                         gold_answers = ['']
                     if qid not in preds:
                         print('Missing prediction for %s' % qid)
                         continue
                     a_pred = preds[qid]["text"]
-                    exact_scores[qid] = max(compute_exact(a, a_pred) for a in gold_answers)
-                    scores[qid] = [compute_f1(a, a_pred) for a in gold_answers]
+                    exact_scores[qid] = max(SQuADEvaluator.compute_exact(a, a_pred) for a in gold_answers)
+                    scores[qid] = [SQuADEvaluator.compute_f1(a, a_pred) for a in gold_answers]
                     f1_scores[qid] = max([s[2] for s in scores[qid]])
                     recall_scores[qid] = max([s[1] for s in scores[qid]])
                     precision_scores[qid] = max([s[0] for s in scores[qid]])
@@ -885,8 +885,8 @@ class SQuADEvaluator:
                             args.n_best_size, args.max_answer_length,
                             args.do_lower_case, args.verbose_logging)
         
-        exact_raw, f1_raw, precision, recall, span_exact, span_f1, span_p, span_r = get_raw_scores(eval_dataset, preds, eval_examples)
-        result = make_eval_dict(exact_raw, f1_raw, precision=precision, recall=recall, span_exact=span_exact, span_f1=span_f1, span_p=span_p, span_r=span_r)
+        exact_raw, f1_raw, precision, recall, span_exact, span_f1, span_p, span_r = SQuADEvaluator.get_raw_scores(eval_dataset, preds, eval_examples)
+        result = SQuADEvaluator.make_eval_dict(exact_raw, f1_raw, precision=precision, recall=recall, span_exact=span_exact, span_f1=span_f1, span_p=span_p, span_r=span_r)
         
         if verbose:
             logger.info("***** Eval results *****")
