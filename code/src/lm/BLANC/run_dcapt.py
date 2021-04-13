@@ -794,7 +794,7 @@ def main_finetuning(args):
                     doc_stride=args.doc_stride,
                     max_query_length=args.max_query_length,
                     is_training=True)
-        elif args.dataset_type == "CRMC":
+        elif args.dataset_type == "CMRC":
             data_processor = CMRCProcessor()
             train_examples, _ = data_processor.read_cmrc_examples(
                     args.train_file, is_training=True, 
