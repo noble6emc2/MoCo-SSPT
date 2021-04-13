@@ -787,7 +787,7 @@ def main_finetuning(args):
             data_processor = SQuADProcessor()
             train_examples = data_processor.read_squad_examples(
                     input_file=args.train_file, is_training=True, version_2_with_negative=args.version_2_with_negative)
-            train_features = data_processor.convert_english_examples_to_features(
+            train_features = data_processor.convert_squad_examples_to_features(
                     examples=train_examples,
                     tokenizer=tokenizer,
                     max_seq_length=args.max_seq_length,
