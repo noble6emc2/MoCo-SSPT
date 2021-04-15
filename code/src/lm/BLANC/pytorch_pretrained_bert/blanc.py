@@ -1289,6 +1289,13 @@ class BLANC(BertPreTrainedModel):
                 f_loss = (start_loss \
                             + end_loss) / 2.0
                 total_loss = (1.0 - lmb) * f_loss + lmb * dist_total_loss
+
+                overall_loss_fct = CrossEntropyLoss(ignore_index=ignored_index, reduction='none')
+                start_losses = overall_loss_fct(start_logits, start_positions)
+                end_losses = overall_loss_fct(end_logits, end_positions)
+                f_losses = (start_losses \
+                            + end_losses) / 2.0
+                overall_total_losses = (1.0 - lmb) * f_losses + lmb * reduced_dist_total_losses
                 return (total_loss, dist_total_loss, reduced_dist_total_losses)
             else:
                 #print("Lmbs:", lmbs, "Lmb", lmb)

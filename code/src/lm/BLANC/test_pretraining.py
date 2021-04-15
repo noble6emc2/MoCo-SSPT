@@ -58,16 +58,16 @@ if __name__ == "__main__":
     parser.add_argument('--remove_query_in_passage', type=bool, default=True)
     parser.add_argument('--enqueue_thread_num', type=int, default=1)
     parser.add_argument('--train_batch_size', type=int, default=1)
-    parser.add_argument('--jacc_thres', type=float, default=0.1)
-    parser.add_argument('--neg_drop_rate', type=float, default=0.4)
+    parser.add_argument('--jacc_thres', type=float, default=0.0)
+    parser.add_argument('--neg_drop_rate', type=float, default=0.0)
     parser.add_argument('--window_size', type=int, default=10)
     parser.add_argument('--warmup_window_size', type=int, default=8)
     parser.add_argument('--dataloader_offset', type=int, default=125000)
-    parser.add_argument('--max_warmup_query_length', type=int, default=65)
-    parser.add_argument('--max_comma_num', type=int, default=5)
+    parser.add_argument('--max_warmup_query_length', type=int, default=1000)
+    parser.add_argument('--max_comma_num', type=int, default=10000)
     parser.add_argument('--lmb', type=float, default=0.5)
     parser.add_argument('--train_file', type=str, 
-        default="/Users/noble6emc2/Desktop/Tencent/BLANC/code/src/lm/BLANC/all_10000.json")
+        default="/Users/noble6emc2/Desktop/Tencent/BLANC/code/src/lm/BLANC/test_train.txt")
     parser.add_argument('--model', type=str, default="bert-base-chinese")
     parser.add_argument('--tokenizer', type=str, default="bert-base-chinese")
     args = parser.parse_args()
@@ -108,7 +108,7 @@ if __name__ == "__main__":
     from tqdm import tqdm
     for batch in tqdm(
         warmup_dataloader.get_warmup_training_batch_chinese(args, co_training = False, p_list = p_list)):
-        pass
+        print(batch)
 
     '''
     doc_tokens = []

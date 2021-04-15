@@ -482,11 +482,15 @@ def main_cotraining(args):
                         model_b.eval()
 
                         with torch.no_grad():
-                            _, _, context_losses_a = model_a(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
-                            _, _, context_losses_b = model_b(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+                            _, overall_losses_a, context_losses_a = model_a(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+                            _, overall_losses_b, context_losses_b = model_b(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
 
-                            lmb_list_a = [i for i in context_losses_b.detach().cpu().numpy()]
-                            lmb_list_b = [i for i in context_losses_a.detach().cpu().numpy()]
+                            if args.select_with_overall_losses:
+                                lmb_list_a = [i for i in overall_losses_b.detach().cpu().numpy()]
+                                lmb_list_b = [i for i in overall_losses_a.detach().cpu().numpy()]
+                            else:
+                                lmb_list_a = [i for i in context_losses_b.detach().cpu().numpy()]
+                                lmb_list_b = [i for i in context_losses_a.detach().cpu().numpy()]
 
                             if args.debug:
                                 print("context_losses_a", context_losses_a, "context_losses_b", context_losses_b)
@@ -1111,6 +1115,7 @@ if __name__ == "__main__":
     parser.add_argument('--enqueue_thread_num', type=int, default=4)
     parser.add_argument('--version_2_with_negative', type=bool, default=False)
     parser.add_argument('--warmup_dataloader', type=bool, default=False)
+    parser.add_argument('--select_with_overall_losses', type=bool, default=False)
     parser.add_argument('--debug', type=bool, default=False)
     parser.add_argument('--theta', type=float, default=0.8)
     parser.add_argument('--moving_loss_warmup_ratio', type=float, default=0.3)
