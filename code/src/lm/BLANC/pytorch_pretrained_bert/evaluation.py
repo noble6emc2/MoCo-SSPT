@@ -12,6 +12,30 @@ logger = logging.getLogger(__name__)
 RawResult = collections.namedtuple("RawResult",
                                    ["unique_id", "start_logits", "end_logits"])
 
+
+def output_loss(args, model, device, eval_dataloader, eval_features):
+    for idx, (input_ids, input_mask, segment_ids, start_positions, end_positions, example_indices) in enumerate(eval_dataloader):
+        all_results = []
+        model.eval()
+        if idx % 10 == 0:
+            logger.info("Running test: %d / %d" % (idx, len(eval_dataloader)))
+            
+        input_ids = input_ids.to(device)
+        input_mask = input_mask.to(device)
+        segment_ids = segment_ids.to(device)
+        with torch.no_grad():
+            _, overall_losses, context_losses = model(input_ids, segment_ids, input_mask, start_positions, end_positions, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
+
+        for i, example_index in enumerate(example_indices):
+            overall_losses = overall_losses[i].detach().cpu().tolist()
+            context_losses = context_losses[i].detach().cpu().tolist()
+            eval_feature = eval_features[example_index.item()]
+            unique_id = int(eval_feature.unique_id)
+            all_results.append((unique_id, overall_losses, context_losses))
+
+    return all_results
+
+
 class MRQAEvaluator:
     @staticmethod
     def make_predictions(all_examples, all_features, all_results, n_best_size,

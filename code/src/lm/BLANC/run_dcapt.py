@@ -33,7 +33,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from pytorch_pretrained_bert.file_utils import PYTORCH_PRETRAINED_BERT_CACHE
 from pytorch_pretrained_bert.file_utils import WEIGHTS_NAME, CONFIG_NAME
 from pytorch_pretrained_bert.blanc import BLANC, BertForQuestionAnswering
-from pytorch_pretrained_bert.evaluation import MRQAEvaluator, SQuADEvaluator
+from pytorch_pretrained_bert.evaluation import MRQAEvaluator, SQuADEvaluator, output_loss, PretrainingProcessor
 from pytorch_pretrained_bert.optimization import BertAdam, warmup_linear
 from pytorch_pretrained_bert.tokenization import BasicTokenizer, BertTokenizer, whitespace_tokenize
 from pytorch_pretrained_bert.tokenization import _is_punctuation, _is_whitespace, _is_control
@@ -1020,6 +1020,24 @@ def main_model_testing(args):
                 max_query_length=args.max_query_length,
                 is_training=False
                 )
+    elif args.dataset_type == "Pretrain":
+        with open(args.train_file, 'rb') as fi:
+            line_list = [line.rstrip().decode('utf-8') for line in fi.readlines()]
+
+        eval_examples = PretrainingProcessor.read_chinese_examples(
+                line_list=line_list, is_training=True, 
+                first_answer_only=True, 
+                replace_mask="[unused1]",
+                do_lower_case=args.do_lower_case,
+                remove_query_in_passage=args.remove_query_in_passage)
+        eval_features = PretrainingProcessor.convert_chinese_examples_to_features(
+                examples=eval_examples,
+                tokenizer=tokenizer,
+                max_seq_length=args.max_seq_length,
+                doc_stride=args.doc_stride,
+                max_query_length=args.max_query_length,
+                is_training=True,
+                first_answer_only=True)
     else:
         raise NotImplementedError("This dataset type is not supported")
 
@@ -1027,16 +1045,40 @@ def main_model_testing(args):
     logger.info("  Num orig examples = %d", len(eval_examples))
     logger.info("  Num split examples = %d", len(eval_features))
     logger.info("  Batch size = %d", args.eval_batch_size)
-    all_input_ids = torch.tensor([f.input_ids for f in eval_features], dtype=torch.long)
-    all_input_mask = torch.tensor([f.input_mask for f in eval_features], dtype=torch.long)
-    all_segment_ids = torch.tensor([f.segment_ids for f in eval_features], dtype=torch.long)
-    all_example_index = torch.arange(all_input_ids.size(0), dtype=torch.long)
-    eval_data = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_example_index)
-    eval_dataloader = DataLoader(eval_data, batch_size=args.eval_batch_size)
-    if args.dataset_type == "SQuAD":
-        result, _, _ = \
-                SQuADEvaluator.evaluate(args, model, device, eval_dataset,
-                            eval_dataloader, eval_examples, eval_features)
+    if args.test_mode == 'metrics':
+        all_input_ids = torch.tensor([f.input_ids for f in eval_features], dtype=torch.long)
+        all_input_mask = torch.tensor([f.input_mask for f in eval_features], dtype=torch.long)
+        all_segment_ids = torch.tensor([f.segment_ids for f in eval_features], dtype=torch.long)
+        all_example_index = torch.arange(all_input_ids.size(0), dtype=torch.long)
+        eval_data = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_example_index)
+        eval_dataloader = DataLoader(eval_data, batch_size=args.eval_batch_size)
+        if args.dataset_type == "SQuAD":
+            result, _, _ = \
+                    SQuADEvaluator.evaluate(args, model, device, eval_dataset,
+                                eval_dataloader, eval_examples, eval_features)
+        else:
+            raise NotImplementedError("This dataset type is not supported")
+    elif args.test_mode == 'loss':
+        all_input_ids = torch.tensor([f.input_ids for _, f in eval_features], dtype=torch.long)
+        all_input_mask = torch.tensor([f.input_mask for _, f in eval_features], dtype=torch.long)
+        all_segment_ids = torch.tensor([f.segment_ids for _, f in eval_features], dtype=torch.long)
+        all_start_positions = torch.tensor([f.start_positions for _, f in eval_features], dtype=torch.long)
+        all_end_positions = torch.tensor([f.end_positions for _, f in eval_features], dtype=torch.long)
+        eval_data = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_start_positions,
+            all_end_positions, all_example_index)
+        eval_dataloader = DataLoader(eval_data, batch_size=args.eval_batch_size)
+        if args.dataset_type == "Pretrain":
+            losses = output_loss(args, model, device, eval_dataloader, eval_features)
+            print('===============loss_result==============')
+            for uid, overall_loss, context_loss in losses:
+                print('%s,%s\n' % (str(uid), context_loss))
+        else:
+            raise NotImplementedError("This dataset type is not supported")
+            
+        '''with open(args.output_loss_file, 'w') as fout:
+            for uid, overall_loss, context_loss in losses:
+                fout.write('%s,%s\n' % (str(uid), context_loss))'''
+                  
     else:
         raise NotImplementedError("Dataset type is not supported.")
 
@@ -1112,6 +1154,7 @@ if __name__ == "__main__":
     parser.add_argument('--do_lower_case', type=bool, default=True)
     parser.add_argument('--remove_query_in_passage', type=bool, default=True)
     parser.add_argument('--co_training_mode', type=str, default='data_cur')
+    parser.add_argument('--test_mode', type=str, default='loss')
     parser.add_argument('--enqueue_thread_num', type=int, default=4)
     parser.add_argument('--version_2_with_negative', type=bool, default=False)
     parser.add_argument('--warmup_dataloader', type=bool, default=False)
