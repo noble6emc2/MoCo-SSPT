@@ -139,3 +139,7 @@ data/
 
 #Checkpoints
 checkpoints/
+
+#Testing stuff
+all_10000.json
+en_sspt_10000.json
