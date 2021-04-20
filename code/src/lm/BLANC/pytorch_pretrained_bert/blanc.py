@@ -1203,7 +1203,7 @@ class BLANC(BertPreTrainedModel):
     def forward(self, input_ids, token_type_ids=None, attention_mask=None, 
             start_positions=None, end_positions=None, lmbs=None,
             geometric_p=0.3, window_size=5, lmb=0.5, batch_idx_mask = None,
-            context_attention_mask=None):
+            context_attention_mask=None, sample_weight=None):
         device = input_ids.device
         sequence_output, _ = self.bert(input_ids, token_type_ids, attention_mask, output_all_encoded_layers=False)
         bsize = sequence_output.size(0)
@@ -1281,7 +1281,27 @@ class BLANC(BertPreTrainedModel):
                 total_loss = ((1.0 - lmb) * f_loss + 
                     lmb * torch.sum(reduced_dist_total_losses * batch_idx_mask))
                 return (total_loss, dist_total_loss, reduced_dist_total_losses)
-            elif lmbs is None:
+            elif lmbs is not None:
+                #print("Lmbs:", lmbs, "Lmb", lmb)
+                loss_fct = CrossEntropyLoss(ignore_index=ignored_index, reduction='none')
+                start_losses = loss_fct(start_logits, start_positions)
+                end_losses = loss_fct(end_logits, end_positions)
+                f_losses = (start_losses \
+                            + end_losses) / 2.0
+                #print("f_losses", f_losses, "reduced_dist_total_losses", reduced_dist_total_losses)
+                total_loss = torch.mean((1.0 - lmbs) * f_losses + lmbs * reduced_dist_total_losses)
+                return (total_loss, dist_total_loss, reduced_dist_total_losses)
+            elif sample_weight is not None:
+                #print("Lmbs:", lmbs, "Lmb", lmb)
+                loss_fct = CrossEntropyLoss(ignore_index=ignored_index, reduction='none')
+                start_losses = loss_fct(start_logits, start_positions)
+                end_losses = loss_fct(end_logits, end_positions)
+                f_losses = (start_losses \
+                            + end_losses) / 2.0
+                #print("f_losses", f_losses, "reduced_dist_total_losses", reduced_dist_total_losses)
+                total_loss = torch.mean(sample_weight * ((1.0 - lmb) * f_losses + lmb * reduced_dist_total_losses))
+                return (total_loss, dist_total_loss, reduced_dist_total_losses)
+            else:
                 #print("No Lmbs !!!!!!!!!!")
                 loss_fct = CrossEntropyLoss(ignore_index=ignored_index)
                 start_loss = loss_fct(start_logits, start_positions)
@@ -1297,16 +1317,6 @@ class BLANC(BertPreTrainedModel):
                             + end_losses) / 2.0
                 overall_total_losses = (1.0 - lmb) * f_losses + lmb * reduced_dist_total_losses
                 return (total_loss, overall_total_losses, reduced_dist_total_losses)
-            else:
-                #print("Lmbs:", lmbs, "Lmb", lmb)
-                loss_fct = CrossEntropyLoss(ignore_index=ignored_index, reduction='none')
-                start_losses = loss_fct(start_logits, start_positions)
-                end_losses = loss_fct(end_logits, end_positions)
-                f_losses = (start_losses \
-                            + end_losses) / 2.0
-                #print("f_losses", f_losses, "reduced_dist_total_losses", reduced_dist_total_losses)
-                total_loss = torch.mean((1.0 - lmbs) * f_losses + lmbs * reduced_dist_total_losses)
-                return (total_loss, dist_total_loss, reduced_dist_total_losses)
         else:
             return start_logits, end_logits, attention
     
