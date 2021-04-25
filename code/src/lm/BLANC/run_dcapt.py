@@ -539,8 +539,8 @@ def main_cotraining(args):
                                 loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, lmbs=lmbs_b, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb, batch_idx_mask=None,
                                 context_attention_mask = mask_b)
                         elif args.co_training_mode == 'd_weight':
-                            d_weight_a = np.exp(lmb_list_a)/sum(np.exp(lmb_list_a))
-                            d_weight_b = np.exp(lmb_list_b)/sum(np.exp(lmb_list_b))
+                            d_weight_a = args.train_batch_size * (np.exp(-lmb_list_a)/sum(np.exp(-lmb_list_a)))
+                            d_weight_b = args.train_batch_size * (np.exp(-lmb_list_b)/sum(np.exp(-lmb_list_b)))
 
                             sample_weight_a = torch.tensor(d_weight_a)
                             sample_weight_b = torch.tensor(d_weight_b)
@@ -559,7 +559,48 @@ def main_cotraining(args):
                             context_attention_mask = None, sample_weight = sample_weight_a)
                             loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, lmbs=None, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb, batch_idx_mask=None,
                             context_attention_mask = None, sample_weight = sample_weight_b)
+                        elif args.co_training_mode == 'data_cur_weight':
+                            #d_weight_a = np.exp(-lmb_list_a)/sum(np.exp(-lmb_list_a))
+                            #d_weight_b = np.exp(-lmb_list_b)/sum(np.exp(-lmb_list_b))
+                            top_k_index_a = set(np.argsort(lmb_list_a)[:math.ceil(args.theta * len(lmb_list_a))])
+                            top_k_index_b = set(np.argsort(lmb_list_b)[:math.ceil(args.theta * len(lmb_list_b))])
+                            last_k_index_a = set(np.argsort(-lmb_list_a)[:math.ceil(args.theta * len(lmb_list_a))])
+                            last_k_index_b = set(np.argsort(-lmb_list_b)[:math.ceil(args.theta * len(lmb_list_b))])
+                            d_weight_a = []
+                            d_weight_b = []
+                            for i in range(len(lmb_list_a)):
+                                if i in top_k_index_a:
+                                    d_weight_a.append(1.5)
+                                elif i in last_k_index_a:
+                                    d_weight_a.append(0.5)
+                                else:
+                                    d_weight_a.append(1)
 
+                            for i in range(len(lmb_list_b)):
+                                if i in top_k_index_b:
+                                    d_weight_b.append(1.5)
+                                elif i in last_k_index_b:
+                                    d_weight_b.append(0.5)
+                                else:
+                                    d_weight_b.append(1)
+
+                            sample_weight_a = torch.tensor(d_weight_a)
+                            sample_weight_b = torch.tensor(d_weight_b)
+                            if n_gpu == 1:
+                                sample_weight_a = sample_weight_a.to(device)
+                                sample_weight_b = sample_weight_b.to(device)
+
+                            if args.debug:
+                                print("lmb_window_list_a", lmb_window_list_a, "lmb_window_list_b", lmb_window_list_b)
+                                print("moving_loss_a", moving_loss_a, "moving_loss_b", moving_loss_b)
+                                print("lmbs_a", lmbs_a, "lmbs_b", lmbs_b)
+                                print("mask_a", mask_a, "mask_b", mask_b)
+                                input()
+
+                            loss_a, _, _ = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, lmbs=None, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb, batch_idx_mask=None,
+                            context_attention_mask = None, sample_weight = sample_weight_a)
+                            loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, lmbs=None, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb, batch_idx_mask=None,
+                            context_attention_mask = None, sample_weight = sample_weight_b)
                         elif args.co_training_mode == 'data_cur':
                             top_k_index_a = set(np.argsort(lmb_list_a)[:math.ceil(args.theta * len(lmb_list_a))])
                             top_k_index_b = set(np.argsort(lmb_list_b)[:math.ceil(args.theta * len(lmb_list_b))])
@@ -1181,7 +1222,7 @@ if __name__ == "__main__":
     parser.add_argument('--warmup_dataloader', type=bool, default=False)
     parser.add_argument('--select_with_overall_losses', type=bool, default=False)
     parser.add_argument('--debug', type=bool, default=False)
-    parser.add_argument('--theta', type=float, default=0.8)
+    parser.add_argument('--theta', type=float, default=0.3)
     parser.add_argument('--moving_loss_warmup_ratio', type=float, default=0.3)
     parser.add_argument('--moving_loss_num', type=int, default=8)
     parser.add_argument('--new_cotraining_optimizer', type=bool, default=False)
