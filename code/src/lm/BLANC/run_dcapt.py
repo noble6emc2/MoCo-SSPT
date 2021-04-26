@@ -539,6 +539,8 @@ def main_cotraining(args):
                                 loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, lmbs=lmbs_b, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb, batch_idx_mask=None,
                                 context_attention_mask = mask_b)
                         elif args.co_training_mode == 'd_weight':
+                            lmb_list_a = np.array(lmb_list_a)
+                            lmb_list_b = np.array(lmb_list_b)
                             d_weight_a = args.train_batch_size * (np.exp(-lmb_list_a)/sum(np.exp(-lmb_list_a)))
                             d_weight_b = args.train_batch_size * (np.exp(-lmb_list_b)/sum(np.exp(-lmb_list_b)))
 
@@ -562,6 +564,8 @@ def main_cotraining(args):
                         elif args.co_training_mode == 'data_cur_weight':
                             #d_weight_a = np.exp(-lmb_list_a)/sum(np.exp(-lmb_list_a))
                             #d_weight_b = np.exp(-lmb_list_b)/sum(np.exp(-lmb_list_b))
+                            lmb_list_a = np.array(lmb_list_a)
+                            lmb_list_b = np.array(lmb_list_b)
                             top_k_index_a = set(np.argsort(lmb_list_a)[:math.ceil(args.theta * len(lmb_list_a))])
                             top_k_index_b = set(np.argsort(lmb_list_b)[:math.ceil(args.theta * len(lmb_list_b))])
                             last_k_index_a = set(np.argsort(-lmb_list_a)[:math.ceil(args.theta * len(lmb_list_a))])
