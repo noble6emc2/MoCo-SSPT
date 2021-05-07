@@ -1146,8 +1146,12 @@ def main_model_testing(args):
                         eval_dataloader, eval_examples, eval_features)
 
             args.version_2_with_negative = True
+            with open(args.dev_file) as f:
+                dataset_json = json.load(f)
+                eval_dataset_squad = dataset_json['data']
+
             _, neg_preds, _ = \
-                SQuADEvaluator.evaluate(args, model, device, eval_dataset,
+                SQuADEvaluator.evaluate(args, model, device, eval_dataset_squad,
                             eval_dataloader, eval_examples, eval_features)
             with open(os.path.join(args.output_dir, 'dev_preds.json'), 'w', encoding = 'utf8') as fout:
                 json.dump(preds, fout, ensure_ascii = False)
