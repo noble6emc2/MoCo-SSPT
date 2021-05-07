@@ -1144,8 +1144,16 @@ def main_model_testing(args):
             result, preds, _ = \
                 MRQAEvaluator.evaluate(args, model, device, eval_dataset,
                         eval_dataloader, eval_examples, eval_features)
+
+            args.version_2_with_negative = True
+            _, neg_preds, _ = \
+                SQuADEvaluator.evaluate(args, model, device, eval_dataset,
+                            eval_dataloader, eval_examples, eval_features)
             with open(os.path.join(args.output_dir, 'dev_preds.json'), 'w', encoding = 'utf8') as fout:
                 json.dump(preds, fout, ensure_ascii = False)
+
+            with open(os.path.join(args.output_dir, 'neg_dev_preds.json'), 'w', encoding = 'utf8') as fout:
+                json.dump(neg_preds, fout, ensure_ascii = False)
         else:
             raise NotImplementedError("This dataset type is not supported")
     elif args.test_mode == 'loss':
