@@ -1064,7 +1064,7 @@ def main_model_testing(args):
             args.model, cache_dir=PYTORCH_PRETRAINED_BERT_CACHE)
     elif args.model_type == "BertForQA":
         model, pretrained_weights = BertForQuestionAnswering.from_pretrained(
-                    args.model, cache_dir=PYTORCH_PRETRAINED_BERT_CACHE)
+            args.model, cache_dir=PYTORCH_PRETRAINED_BERT_CACHE)
     else:
         raise NotImplementedError("This model type is not supported")
 
