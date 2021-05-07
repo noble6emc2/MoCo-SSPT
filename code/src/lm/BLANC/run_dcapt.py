@@ -1069,11 +1069,11 @@ def main_model_testing(args):
     if n_gpu > 1:
         model = torch.nn.DataParallel(model)
     
-    with open(args.dev_file) as f:
-        dataset_json = json.load(f)
-
-    eval_dataset = dataset_json['data']
     if args.dataset_type == "SQuAD":
+        with open(args.dev_file) as f:
+            dataset_json = json.load(f)
+
+        eval_dataset = dataset_json['data']
         eval_examples = SQuADProcessor.read_squad_examples(
                 input_file=args.dev_file, is_training=False,
                 version_2_with_negative=args.version_2_with_negative
@@ -1104,6 +1104,21 @@ def main_model_testing(args):
                 max_query_length=args.max_query_length,
                 is_training=True,
                 first_answer_only=True)
+    elif args.dataset_type == 'CMRC':
+            data_processor = CMRCProcessor()
+            eval_examples, eval_dataset = data_processor.read_cmrc_examples(
+                    args.dev_file, is_training=True, 
+                    first_answer_only=True, 
+                    do_lower_case=True,
+                    remove_query_in_passage=False)
+            eval_features = data_processor.convert_chinese_examples_to_features(
+                        examples=eval_examples,
+                        tokenizer=tokenizer,
+                        max_seq_length=args.max_seq_length,
+                        doc_stride=args.doc_stride,
+                        max_query_length=args.max_query_length,
+                        is_training=True,
+                        first_answer_only=True)
     else:
         raise NotImplementedError("This dataset type is not supported")
 
@@ -1120,8 +1135,14 @@ def main_model_testing(args):
         eval_dataloader = DataLoader(eval_data, batch_size=args.eval_batch_size)
         if args.dataset_type == "SQuAD":
             result, _, _ = \
-                    SQuADEvaluator.evaluate(args, model, device, eval_dataset,
-                                eval_dataloader, eval_examples, eval_features)
+                SQuADEvaluator.evaluate(args, model, device, eval_dataset,
+                            eval_dataloader, eval_examples, eval_features)
+        elif args.dataset_type == "CMRC":
+            result, preds, _ = \
+                MRQAEvaluator.evaluate(args, model, device, eval_dataset,
+                        eval_dataloader, eval_examples, eval_features)
+            with open(os.path.join(args.output_dir, 'dev_preds.json'), 'w', encoding = 'utf8') as fout:
+                json.dump(preds, fout, ensure_ascii = False)
         else:
             raise NotImplementedError("This dataset type is not supported")
     elif args.test_mode == 'loss':
@@ -1220,7 +1241,7 @@ if __name__ == "__main__":
     parser.add_argument('--do_lower_case', type=bool, default=True)
     parser.add_argument('--remove_query_in_passage', type=bool, default=True)
     parser.add_argument('--co_training_mode', type=str, default='data_cur')
-    parser.add_argument('--test_mode', type=str, default='loss')
+    parser.add_argument('--test_mode', type=str, default='metrics')
     parser.add_argument('--enqueue_thread_num', type=int, default=4)
     parser.add_argument('--version_2_with_negative', type=bool, default=False)
     parser.add_argument('--warmup_dataloader', type=bool, default=False)
