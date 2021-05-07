@@ -1059,7 +1059,10 @@ def main_model_testing(args):
     tokenizer = BertTokenizer.from_pretrained(
         args.tokenizer, do_lower_case=args.do_lower_case)
 
-    if args.model_type == "BertForQA":
+    if args.model_type == "BLANC":
+        model, pretrained_weights = BLANC.from_pretrained(
+            args.model, cache_dir=PYTORCH_PRETRAINED_BERT_CACHE)
+    elif args.model_type == "BertForQA":
         model, pretrained_weights = BertForQuestionAnswering.from_pretrained(
                     args.model, cache_dir=PYTORCH_PRETRAINED_BERT_CACHE)
     else:
