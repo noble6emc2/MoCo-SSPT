@@ -1052,6 +1052,8 @@ def main_finetuning(args):
 
 
 def main_model_testing(args):
+    if not os.path.exists(args.output_dir):
+        os.makedirs(args.output_dir)
     device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
     n_gpu = torch.cuda.device_count()
     logger.info("device: {}, n_gpu: {}, 16-bits training: {}".format(
