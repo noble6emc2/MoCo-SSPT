@@ -1075,7 +1075,7 @@ def main_model_testing(args):
         model = torch.nn.DataParallel(model)
     
     if args.dataset_type == "SQuAD":
-        with open(args.dev_file, 'r', encoding = 'utf8') as f:
+        with open(args.dev_file, 'r', encoding = 'utf-8') as f:
             dataset_json = json.load(f)
 
         eval_dataset = dataset_json['data']
