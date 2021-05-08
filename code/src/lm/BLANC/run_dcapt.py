@@ -363,11 +363,19 @@ def main_cotraining(args):
 
 
         for lr in lrs:
-            assert args.model_type == "BLANC"
-            model_a, pretrained_weights_a = BLANC.from_pretrained(
-                args.model, cache_dir=PYTORCH_PRETRAINED_BERT_CACHE)
-            model_b, pretrained_weights_b = BLANC.from_pretrained(
-                args.model, cache_dir=PYTORCH_PRETRAINED_BERT_CACHE)
+            if args.model_type == "BLANC":
+                model_a, pretrained_weights_a = BLANC.from_pretrained(
+                    args.model, cache_dir=PYTORCH_PRETRAINED_BERT_CACHE)
+                model_b, pretrained_weights_b = BLANC.from_pretrained(
+                    args.model, cache_dir=PYTORCH_PRETRAINED_BERT_CACHE)
+            elif args.model_type == "BertForQA":
+                model_a, pretrained_weights_a = BertForQuestionAnswering.from_pretrained(
+                    args.model, cache_dir=PYTORCH_PRETRAINED_BERT_CACHE)
+                model_b, pretrained_weights_b = BertForQuestionAnswering.from_pretrained(
+                    args.model, cache_dir=PYTORCH_PRETRAINED_BERT_CACHE)
+            else:
+                raise NotImplementedError("Unknown Model Type")
+
             if args.fp16:
                 model_a.half()
                 model_b.half()
@@ -637,6 +645,11 @@ def main_cotraining(args):
                             else:
                                 loss_a, _, _ = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, lmbs=lmbs_a, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb, batch_idx_mask=None)
                                 loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, lmbs=lmbs_b, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb, batch_idx_mask=None)
+                        elif args.co_training_mode == 'no_teaching':
+                            loss_a, _, _ = model_a(input_ids_a, segment_ids_a, input_mask_a, start_positions_a, end_positions_a, lmbs=None, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb, batch_idx_mask=None,
+                            context_attention_mask = None, sample_weight = None)
+                            loss_b, _, _ = model_b(input_ids_b, segment_ids_b, input_mask_b, start_positions_b, end_positions_b, lmbs=None, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb, batch_idx_mask=None,
+                            context_attention_mask = None, sample_weight = None)
                         else:
                             raise Exception("Unsuppoted co training mode.")
                     

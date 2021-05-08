@@ -1367,7 +1367,8 @@ class BertForQuestionAnswering(BertPreTrainedModel):
 
     def forward(self, input_ids, token_type_ids=None, attention_mask=None, 
             start_positions=None, end_positions=None, lmbs=None,
-            geometric_p=0.3, window_size=5, lmb=0.5, batch_idx_mask = None):
+            geometric_p=0.3, window_size=5, lmb=0.5, batch_idx_mask = None, 
+            context_attention_mask = None, sample_weight = None):
         device = input_ids.device
         sequence_output, _ = self.bert(input_ids, token_type_ids, attention_mask, output_all_encoded_layers=False)
         logits = self.qa_outputs(sequence_output)
@@ -1391,6 +1392,17 @@ class BertForQuestionAnswering(BertPreTrainedModel):
             end_loss = loss_fct(end_logits, end_positions)
             total_loss = (start_loss \
                         + end_loss) / 2.0
-            return (total_loss, None, None)
+
+            overall_loss_fct = CrossEntropyLoss(ignore_index=ignored_index, reduction='none')
+            start_losses = overall_loss_fct(start_logits, start_positions)
+            end_losses = overall_loss_fct(end_logits, end_positions)
+            total_losses = (start_losses \
+                        + end_losses) / 2.0
+            
+            if sample_weight is not None:
+                weighted_total_loss = torch.mean(sample_weight * total_losses)
+                return (weighted_total_loss, None, None)
+            else:
+                return (total_loss, total_losses, None)
         else:
             return start_logits, end_logits, None
