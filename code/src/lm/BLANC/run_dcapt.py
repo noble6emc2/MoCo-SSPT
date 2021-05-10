@@ -168,15 +168,27 @@ def main(args):
                 running_loss = 0.0
                 if args.training_lang == 'EN':
                     get_batch_fn = dataloader.get_training_batch_english
+                    get_warmup_batch_fn = warmup_dataloader.get_warmup_training_batch_english
                 elif args.training_lang == 'CN':
                     get_batch_fn = dataloader.get_training_batch_chinese
+                    get_warmup_batch_fn = warmup_dataloader.get_warmup_training_batch_chinese
                 else:
                     raise NotImplementedError('This training language is not support')
 
-                for step, batch in tqdm(enumerate(
-                    get_batch_fn(
-                        args, co_training = False, p_list = p_list)), 
-                        total = args.num_iteration):
+                if args.warmup_dataloader:
+                    dataloader_iterator = enumerate(
+                        get_warmup_batch_fn(
+                            args, co_training = False, p_list = p_list)
+                    )
+                else:
+                    dataloader_iterator = enumerate(
+                        get_batch_fn(
+                            args, co_training = False, p_list = p_list)
+                    )
+
+                for step, batch in tqdm(
+                    dataloader_iterator, 
+                    total = args.num_iteration):
                     if step >= args.num_iteration:
                         for p in p_list:
                             if p.is_alive:
