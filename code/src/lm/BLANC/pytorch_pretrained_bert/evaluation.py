@@ -261,12 +261,12 @@ class MRQAEvaluator:
     @staticmethod
     def get_raw_scores(dataset, predictions, examples):
         answers = {}
-        '''for qa in dataset:
+        for qa in dataset:
             #for qa in example['qas']:
-            answers[qa['qid']] = qa['answers']'''
-        for example in dataset:
+            answers[qa['qid']] = qa['answers']
+        '''for example in dataset:
             for qa in example['qas']:
-                answers[qa['qid']] = qa['answers']
+                answers[qa['qid']] = qa['answers']'''
 
         exact_scores = {}
         f1_scores = {}
