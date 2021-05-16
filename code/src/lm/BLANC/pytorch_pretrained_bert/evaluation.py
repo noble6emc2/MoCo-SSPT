@@ -259,14 +259,19 @@ class MRQAEvaluator:
 
 
     @staticmethod
-    def get_raw_scores(dataset, predictions, examples):
+    def get_raw_scores(dataset, predictions, examples, lang = 'CN'):
         answers = {}
-        for qa in dataset:
-            #for qa in example['qas']:
-            answers[qa['qid']] = qa['answers']
-        '''for example in dataset:
-            for qa in example['qas']:
-                answers[qa['qid']] = qa['answers']'''
+        
+        if lang == "CN":
+            for qa in dataset:
+                #for qa in example['qas']:
+                answers[qa['qid']] = qa['answers']
+        elif lang == "EN":
+            for example in dataset:
+                for qa in example['qas']:
+                    answers[qa['qid']] = qa['answers']
+        else:
+            raise NotImplementedError("Language not supported")
 
         exact_scores = {}
         f1_scores = {}
