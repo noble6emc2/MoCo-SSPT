@@ -398,7 +398,7 @@ class MRQAEvaluator:
                             args.n_best_size, args.max_answer_length,
                             args.do_lower_case, args.verbose_logging)
         
-        exact_raw, f1_raw, precision, recall, span_exact, span_f1, span_p, span_r = MRQAEvaluator.get_raw_scores(eval_dataset, preds, eval_examples)
+        exact_raw, f1_raw, precision, recall, span_exact, span_f1, span_p, span_r = MRQAEvaluator.get_raw_scores(eval_dataset, preds, eval_examples, lang = args.training_lang)
         result = MRQAEvaluator.make_eval_dict(exact_raw, f1_raw, precision=precision, recall=recall, span_exact=span_exact, span_f1=span_f1, span_p=span_p, span_r=span_r)
         
         if verbose:
