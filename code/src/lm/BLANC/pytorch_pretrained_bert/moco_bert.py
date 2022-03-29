@@ -17,6 +17,7 @@
 """PyTorch BERT model."""
 
 from __future__ import absolute_import, division, print_function, unicode_literals
+from selectors import EpollSelector
 
 import numpy as np
 import math
@@ -32,7 +33,7 @@ import sys
 from io import open
 
 import torch
-from torch import nn
+from torch import Tensor, nn
 from torch.nn import CrossEntropyLoss
 
 from .file_utils import cached_path, WEIGHTS_NAME, CONFIG_NAME
@@ -1406,3 +1407,213 @@ class BertForQuestionAnswering(BertPreTrainedModel):
                 return (total_loss, total_losses, None)
         else:
             return start_logits, end_logits, None
+
+
+from pytorch_pretrained_bert.file_utils import PYTORCH_PRETRAINED_BERT_CACHE
+from pytorch_pretrained_bert.file_utils import WEIGHTS_NAME, CONFIG_NAME
+from pytorch_pretrained_bert.optimization import BertAdam, warmup_linear
+
+class BertMoCo():
+    def __init__(self, args, lr, num_train_optimization_steps, moco_momentum, K, q_dim):
+        device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
+        n_gpu = torch.cuda.device_count()
+        self.m = moco_momentum
+        self.args = args
+        self.model_q, pretrained_weights = BertForQuestionAnswering.from_pretrained(
+                    args.model, cache_dir=PYTORCH_PRETRAINED_BERT_CACHE)
+        self.model_k, pretrained_weights = BertForQuestionAnswering.from_pretrained(
+            args.model, cache_dir=PYTORCH_PRETRAINED_BERT_CACHE)
+
+        self.model_q.to(device)
+        self.model_k.to(device)
+        if n_gpu > 1:
+            self.model_q = torch.nn.DataParallel(self.model_q)
+            self.model_k = torch.nn.DataParallel(self.model_k)
+
+        self.optmizer_q = self._create_optimizer(
+            args, self.model_q, 
+            lr, num_train_optimization_steps
+        )
+        for param_k in self.model_k.parameters():
+            param_k.requires_grad = False
+
+        self.queue_dict = {
+            "qg": torch.randn(q_dim, K),
+            "qg_ptr": torch.zeros(1, dtype=torch.long),
+            "aqg": torch.randn(q_dim, K),
+            "aqg_ptr": torch.zeros(1, dtype=torch.long),
+            "ctx": torch.randn(q_dim, K),
+            "ctx_ptr": torch.zeros(1, dtype=torch.long),
+        }
+
+    def _create_optimizer(self, args, model, lr, num_train_optimization_steps):
+        param_optimizer = list(model.named_parameters())
+        param_optimizer = [n for n in param_optimizer if 'pooler' not in n[0]]
+        no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
+        optimizer_grouped_parameters = [
+            {'params': [p for n, p in param_optimizer
+                        if not any(nd in n for nd in no_decay)], 'weight_decay': 0.01},
+            {'params': [p for n, p in param_optimizer
+                        if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
+        ]
+
+        optimizer = BertAdam(optimizer_grouped_parameters,
+                    lr=lr,
+                    warmup=args.warmup_proportion,
+                    t_total=num_train_optimization_steps)
+
+        return optimizer
+
+    def train_k_q(self):
+        self.model_k.train()
+        self.model_q.train()
+
+    def eval_k_q(self):
+        self.model_k.eval()
+        self.model_q.eval()
+    
+    @torch.no_grad()
+    def _momentum_update_key_encoder(self):
+        """
+        Momentum update of the key encoder
+        """
+        for param_q, param_k in zip(self.model_q.parameters(), self.model_k.parameters()):
+            param_k.data = param_k.data * self.m + param_q.data * (1. - self.m)
+
+    
+    @torch.no_grad()
+    def _dequeue_and_enqueue(self, keys, q_name):
+        ptr = int(self.queue_dict["{}_ptr".format(q_name)])
+        assert self.K % self.args.batch_size == 0  # for simplicity
+
+        # replace the keys at ptr (dequeue and enqueue)
+        self.queue_dict[q_name][:, ptr:ptr + self.args.batch_size] = keys.T
+        ptr = (ptr + self.args.batch_size) % self.K  
+        self.queue_dict["{}_ptr".format(q_name)] = ptr # move pointer
+
+
+    def moco_loss(
+            self, logits_q: Tensor, logits_k: Tensor, 
+            st_queue: Tensor, en_queue: Tensor, temperature
+        ):
+        start_logits_q, end_logits_q = logits_q
+        start_logits_q = nn.functional.normalize(start_logits_q, dim = 1)
+        end_logits_q = nn.functional.normalize(end_logits_q, dim = 1)
+        start_logits_k, end_logits_k = logits_k
+        start_logits_k = nn.functional.normalize(start_logits_k, dim = 1)
+        end_logits_k = nn.functional.normalize(end_logits_k, dim = 1)
+        start_logits_k.detach()
+        end_logits_k.detach()
+        N = start_logits_q.size(0)
+        C = start_logits_q.size(1)
+
+
+        l_pos_start = torch.bmm(
+            start_logits_q.view(N, 1, C),
+            start_logits_k.view(N, C, 1)
+            ) # N * 1
+        l_pos_end = torch.bmm(
+            end_logits_q.view(N, 1, C),
+            end_logits_k.view(N, C, 1)
+            ) # N * 1
+        l_neg_start = torch.mm(
+            start_logits_q.view(N, C),
+            st_queue.view(C, -1)
+            ) # N * K
+        l_neg_end = torch.mm(
+            end_logits_q.view(N, C),
+            en_queue.view(C, -1)
+            ) # N * K
+
+        logits_start = torch.cat([l_pos_start, l_neg_start], dim = 1)
+        logits_end = torch.cat([l_pos_end, l_neg_end], dim = 1)
+        labels = torch.zeros(N)
+        loss_fct = CrossEntropyLoss()
+        loss_start = loss_fct(logits_start / temperature, labels)
+        loss_end = loss_fct(logits_end / temperature, labels)
+
+        return (loss_start + loss_end) / 2.0
+
+
+    def total_moco_loss(
+            self, logits_dict, path_list,
+            queue_dict, moco_weights, temperature
+        ):
+        total_loss = 0
+        for (q_name, k_name, queue_key), weight in zip(path_list, moco_weights):
+            total_loss += weight * self.moco_loss(
+                logits_dict[q_name], logits_dict[k_name],
+                queue_dict[queue_key]["start"], queue_dict[queue_key]["end"],
+                temperature
+            )
+
+        return total_loss / float(sum(moco_weights))
+
+
+    def get_logits(self, inputs, model):
+        ( 
+            input_ids, token_type_ids, attention_mask, start_positions, end_positions
+        ) = inputs
+        start_logits, end_logits, _ = model.forward(
+            input_ids = input_ids, token_type_ids = token_type_ids,
+            attention_mask = attention_mask
+            )
+        output_logits = (start_logits, end_logits)
+
+        return output_logits
+
+
+    def get_qa_loss(self, inputs, model):
+        ( 
+            input_ids, token_type_ids, attention_mask, start_positions, end_positions
+        ) = inputs
+        total_loss, total_losses = model.forward(
+            input_ids = input_ids, token_type_ids = token_type_ids,
+            attention_mask = attention_mask, start_positions = start_positions, 
+            end_positions = end_positions
+            )
+
+        return total_loss, total_losses
+
+    
+    def forward(
+            self, path_list, input_dict,
+            moco_weights, temperature, 
+            moco_ratio, output_type = "train"
+        ):
+        if output_type == "test":
+            self.model_q.eval()
+            with torch.no_grad():
+                return self.get_logits(inputs, self.model_k)
+
+        self._momentum_update_key_encoder() # Update encoder k's parameter
+        logits_dict = {}
+        for input_name, inputs in input_dict.items():
+            if input_name.split("_")[-1] == 'k':
+                with torch.no_grad():
+                    logits_dict[input_name] = self.get_logits(inputs, self.model_k)
+            elif input_name.split("_")[-1] == 'q':
+                logits_dict[input_name] = self.get_logits(inputs, self.model_q)
+            else:
+                raise NotImplementedError("Invalid input name: {}".format(input_name))
+
+        sspt_loss, _ = self.get_qa_loss(input_dict["sspt_q"], self.model_k)
+        total_moco_loss = self.total_moco_loss(
+            logits_dict = logits_dict, path_list = path_list,
+            queue_dict = self.queue_dict, moco_weights = moco_weights,
+            temperature = temperature
+            )
+
+        # Push key encoder embedding to queue dict
+        for logits_name, logits in logits_dict.items():
+            if logits_name.split("_")[-1] == 'k':
+                q_name = logits_name.split("_")[0]
+                self._dequeue_and_enqueue(logits, q_name)
+
+        return (
+            (1 - moco_ratio) * sspt_loss + moco_ratio * total_moco_loss, 
+            sspt_loss, 
+            total_moco_loss
+            )
+
+        
