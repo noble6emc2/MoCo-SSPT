@@ -27,7 +27,7 @@ sys.path.append(os.path.dirname(__file__))
 import numpy as np
 import torch
 import datetime
-import pytorch_pretrained_bert.pretrain_dataloader as dataloader
+from pytorch_pretrained_bert.moco_dataloader import moco_dataloader
 from torch.utils.data import DataLoader, TensorDataset
 from pytorch_pretrained_bert.file_utils import PYTORCH_PRETRAINED_BERT_CACHE
 from pytorch_pretrained_bert.file_utils import WEIGHTS_NAME, CONFIG_NAME
@@ -51,163 +51,6 @@ logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s - %(message)s
                     datefmt='%m/%d/%Y %H:%M:%S',
                     level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-def main_moco(args):
-    '''if args.model_type == "BertMoCo":
-                bert_moco = BertMoCo(args, lr, num_train_optimization_steps)
-            el'''
-    device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
-    n_gpu = torch.cuda.device_count()
-    logger.info("device: {}, n_gpu: {}, 16-bits training: {}".format(
-        device, n_gpu, args.fp16))
-
-    from torch.utils.tensorboard import SummaryWriter
-    # default `log_dir` is "runs" - we'll be more specific here
-    writer = SummaryWriter(
-        os.path.join(args.output_dir, "moco_training_loss_lmb_%s/" % str(args.lmb) 
-        + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")))
-
-    random.seed(args.seed)
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
-    if n_gpu > 0:
-        torch.cuda.manual_seed_all(args.seed)
-
-    if args.gradient_accumulation_steps < 1:
-        raise ValueError("Invalid gradient_accumulation_steps parameter: {}, should be >= 1".format(
-                            args.gradient_accumulation_steps))
-    args.train_batch_size = \
-        args.train_batch_size // args.gradient_accumulation_steps
-
-    if not args.do_train and not args.do_eval:
-        raise ValueError("At least one of `do_train` or `do_eval` must be True.")
-
-    if args.do_train:
-        assert (args.train_file is not None) and (args.dev_file is not None)
-
-    if args.eval_test:
-        assert args.test_file is not None
-    else:
-        assert args.dev_file is not None
-
-    if not os.path.exists(args.output_dir):
-        os.makedirs(args.output_dir)
-    if args.do_train:
-        logger.addHandler(logging.FileHandler(os.path.join(args.output_dir, "train.log"), 'w'))
-    else:
-        logger.addHandler(logging.FileHandler(os.path.join(args.output_dir, "eval.log"), 'w'))
-    
-    logger.info(args)
-
-    tokenizer = BertTokenizer.from_pretrained(
-        args.tokenizer, do_lower_case=args.do_lower_case)
-
-    if args.do_train:
-        num_train_optimization_steps = \
-            args.num_iteration // args.gradient_accumulation_steps * args.num_train_epochs
-        logger.info("***** Train *****")
-        logger.info("  Num orig examples = %d", args.num_iteration * args.train_batch_size)
-        logger.info("  Num split examples = %d", args.num_iteration)
-        logger.info("  Batch size = %d", args.train_batch_size)
-        logger.info("  Num steps = %d", num_train_optimization_steps)
-
-        eval_step = max(1, args.num_iteration // args.eval_per_epoch)
-        best_result = None
-        lrs = [args.learning_rate] if args.learning_rate else [1e-6, 2e-6, 3e-6, 5e-6, 1e-5, 2e-5, 3e-5, 5e-5]
-        for lr in lrs:
-            if args.model_type == "BertMoCo":
-                bert_moco = BertMoCo(args, lr, num_train_optimization_steps)
-            else:
-                raise NotImplementedError("Unknown Model Type")
-
-            global_step = 0
-            start_time = time.time()
-            from tqdm import tqdm
-            p_list = []
-            for epoch in range(int(args.num_train_epochs)):
-                bert_moco.train_k_q()
-                logger.info("Start epoch #{} (lr = {})...".format(epoch, lr))
-                running_loss = 0.0
-                if args.training_lang == 'EN':
-                    get_batch_fn = dataloader.get_training_batch_english
-                else:
-                    raise NotImplementedError('This training language is not support')
-
-                dataloader_iterator = enumerate(
-                    get_batch_fn(
-                        args, co_training = False, p_list = p_list)
-                )
-
-                for step, batch_dict in tqdm(
-                    dataloader_iterator, 
-                    total = args.num_iteration):
-                    if n_gpu == 1:
-                        batch = tuple(t.to(device) for t in batch)
-
-                    path_list = [
-                        ("sspt_q", "pg_k", "pg"),
-                        ("sspt_q", "apg_k", "apg"),
-                        ("sspt_q", "ctx_k", "ctx")
-                        ]
-                    moco_weights = [1, 1, 1]
-
-
-                    loss, _, _ = bert_moco.forward(
-                        path_list, batch_dict,
-                        moco_weights, args.temperature, 
-                        args.moco_ratio, output_type = "train"
-                    )
-                    #print("step", step,"loss", loss)
-
-                    if n_gpu > 1:
-                        loss = loss.mean()
-                    if args.gradient_accumulation_steps > 1:
-                        loss = loss / args.gradient_accumulation_steps
-                        
-                    loss.backward()
-                    
-                    if (step + 1) % args.gradient_accumulation_steps == 0:
-                        bert_moco.optimizer_q.step()
-                        bert_moco.optimizer_q.zero_grad()
-                        global_step += 1
-
-                    running_loss += loss.item()
-                    if (step + 1) % 500 == 0:
-                       writer.add_scalar('Training loss of baseline with lmb %s' % str(args.lmb),
-                            running_loss / 500,
-                            epoch * args.num_iteration + step + 1)
-                       running_loss = 0.0
-
-                    if (step + 1) % eval_step == 0:
-                        logger.info('Epoch: {}, Step: {} / {}, used_time = {:.2f}s'.format(
-                            epoch, step + 1, args.num_iteration, time.time() - start_time))
-
-                        save_model = False
-                        if args.do_eval:
-                            raise NotImplementedError('This branch should not be entered')
-                        else:
-                            save_model = True
-
-                        if save_model:
-                            model = bert_moco.model_q
-                            model_to_save = model.module if hasattr(model, 'module') else model
-                            output_model_file = os.path.join(args.output_dir, WEIGHTS_NAME)
-                            output_config_file = os.path.join(args.output_dir, CONFIG_NAME)
-                            torch.save(model_to_save.state_dict(), output_model_file)
-                            model_to_save.config.to_json_file(output_config_file)
-                            tokenizer.save_vocabulary(args.output_dir)
-                            if best_result:
-                                with open(os.path.join(args.output_dir, EVAL_FILE), "w") as writer:
-                                    for key in sorted(best_result.keys()):
-                                        writer.write("%s = %s\n" % (key, str(best_result[key])))
-
-                    if step + 1 >= args.num_iteration:
-                        for p in p_list:
-                            if p.is_alive:
-                                p.terminate()
-                                p.join()
-
-                        break
 
 
 def main(args):
@@ -322,30 +165,29 @@ def main(args):
                 logger.info("Start epoch #{} (lr = {})...".format(epoch, lr))
                 running_loss = 0.0
                 if args.training_lang == 'EN':
-                    get_batch_fn = dataloader.get_training_batch_english
+                    data_loader = moco_dataloader()
+                    get_batch_fn = data_loader.get_training_moco_batch_english
                 else:
                     raise NotImplementedError('This training language is not support')
 
                 dataloader_iterator = enumerate(
-                    get_batch_fn(
-                        args, co_training = False, p_list = p_list)
-                )
+                    get_batch_fn(args = args)
+                    )
 
-                for step, batch in tqdm(
+                for step, batch_dict in tqdm(
                     dataloader_iterator, 
                     total = args.num_iteration):
                     if step >= args.num_iteration:
-                        for p in p_list:
-                            if p.is_alive:
-                                p.terminate()
-                                p.join()
-
+                        data_loader.stop_iterate()
                         break
 
+                    batch = batch_dict["sspt"]
                     if n_gpu == 1:
                         batch = tuple(t.to(device) for t in batch)
 
                     input_ids, input_mask, segment_ids, start_positions, end_positions = batch
+                    #print(input_ids, input_ids.size())
+                    #input()
                     loss, _, _ = model(input_ids, segment_ids, input_mask, start_positions, end_positions, geometric_p=args.geometric_p, window_size=args.window_size, lmb=args.lmb)
                     #print("step", step,"loss", loss)
 
@@ -371,10 +213,10 @@ def main(args):
 
                     running_loss += loss.item()
                     if (step + 1) % 500 == 0:
-                       writer.add_scalar('Training loss of baseline with lmb %s' % str(args.lmb),
+                        writer.add_scalar('Training loss of baseline with lmb %s' % str(args.lmb),
                             running_loss / 500,
                             epoch * args.num_iteration + step + 1)
-                       running_loss = 0.0
+                        running_loss = 0.0
 
                     if (step + 1) % eval_step == 0:
                         logger.info('Epoch: {}, Step: {} / {}, used_time = {:.2f}s'.format(
@@ -393,10 +235,21 @@ def main(args):
                             torch.save(model_to_save.state_dict(), output_model_file)
                             model_to_save.config.to_json_file(output_config_file)
                             tokenizer.save_vocabulary(args.output_dir)
-                            if best_result:
-                                with open(os.path.join(args.output_dir, EVAL_FILE), "w") as writer:
-                                    for key in sorted(best_result.keys()):
-                                        writer.write("%s = %s\n" % (key, str(best_result[key])))
+                            #Save dataloader state
+                            loader_state = data_loader.save_state()
+                            #print(type(loader_state["offset_list"]))
+                            output_dataloader_file = os.path.join(args.output_dir, 'dataloader_state.pkl')
+                            with open(output_dataloader_file, "wb") as fout:
+                                pkl.dump(loader_state, fout)
+                            #Save training step & optimizerstate
+                            optimizer_file = os.path.join(args.output_dir, 'training_num_optimzer_state.pkl')
+                            torch.save({
+                                "epoch": epoch,
+                                "training_step": step + 1,
+                                "optimizer": optimizer.state_dict()
+                            }, optimizer_file)
+
+
 
 
 
@@ -476,23 +329,15 @@ if __name__ == "__main__":
     parser.add_argument('--theta', type=float, default=0.3)
     parser.add_argument('--moving_loss_warmup_ratio', type=float, default=0.3)
     parser.add_argument('--moving_loss_num', type=int, default=8)
-    parser.add_argument('--new_cotraining_optimizer', type=bool, default=False)
     parser.add_argument('--is_idx_mask', type=bool, default=False)
     parser.add_argument('--jacc_thres', type=float, default=0.2)
     parser.add_argument('--neg_drop_rate', type=float, default=0.4)
     parser.add_argument('--max_warmup_query_length', type=int, default=40)
     parser.add_argument('--max_comma_num', type=int, default=5)
     parser.add_argument('--warmup_window_size', type=int, default=8)
-    parser.add_argument('--temperature', type=int, required = True)
-    parser.add_argument('--moco_ratio', type=int, required = True)
     args = parser.parse_args()
 
-    print('------new_cotraining_optimizer-----: %s' % args.new_cotraining_optimizer)
-
-    if args.command == 'moco':
-        logger.info('enter moco....')
-        main_moco(args)
-    elif args.command == 'pretraining':
+    if args.command == 'pretraining':
         logger.info('enter pretraining....')
         main(args)
     else:

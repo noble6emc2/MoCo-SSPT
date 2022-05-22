@@ -1,0 +1,1 @@
+CUDA=0,1 ITERNUM=312500 LABEL=trial_001_baseline_sspt_loss SEED=0 DATA_DIR=/research/d4/gds/mindahu21/ssptGen/000 bash ./moco_scripts/moco_baseline.sh

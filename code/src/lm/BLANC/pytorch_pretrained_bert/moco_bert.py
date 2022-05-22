@@ -18,6 +18,7 @@
 
 from __future__ import absolute_import, division, print_function, unicode_literals
 from selectors import EpollSelector
+from typing import Tuple
 
 import numpy as np
 import math
@@ -729,7 +730,8 @@ class BertModel(BertPreTrainedModel):
         # positions we want to attend and -10000.0 for masked positions.
         # Since we are adding it to the raw scores before the softmax, this is
         # effectively the same as removing these entirely.
-        extended_attention_mask = extended_attention_mask.to(dtype=next(self.parameters()).dtype) # fp16 compatibility
+        #extended_attention_mask = extended_attention_mask.to(dtype=next(self.parameters()).dtype) # fp16 compatibility
+        extended_attention_mask = extended_attention_mask.to(dtype=torch.float32) # fp16 compatibility
         extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
 
         embedding_output = self.embeddings(input_ids, token_type_ids)
@@ -1412,16 +1414,16 @@ class BertForQuestionAnswering(BertPreTrainedModel):
 from pytorch_pretrained_bert.file_utils import PYTORCH_PRETRAINED_BERT_CACHE
 from pytorch_pretrained_bert.file_utils import WEIGHTS_NAME, CONFIG_NAME
 from pytorch_pretrained_bert.optimization import BertAdam, warmup_linear
-
-class BertMoCo():
+import torch.nn.functional as func
+class BertMoCo(nn.Module):
     def __init__(self, args, lr, num_train_optimization_steps, moco_momentum, K, q_dim):
         device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
         n_gpu = torch.cuda.device_count()
         self.m = moco_momentum
         self.args = args
-        self.model_q, pretrained_weights = BertForQuestionAnswering.from_pretrained(
+        self.model_q, _ = BertForQuestionAnswering.from_pretrained(
                     args.model, cache_dir=PYTORCH_PRETRAINED_BERT_CACHE)
-        self.model_k, pretrained_weights = BertForQuestionAnswering.from_pretrained(
+        self.model_k, _ = BertForQuestionAnswering.from_pretrained(
             args.model, cache_dir=PYTORCH_PRETRAINED_BERT_CACHE)
 
         self.model_q.to(device)
@@ -1434,6 +1436,7 @@ class BertMoCo():
             args, self.model_q, 
             lr, num_train_optimization_steps
         )
+        #model_k is only used for inference
         for param_k in self.model_k.parameters():
             param_k.requires_grad = False
 
@@ -1493,15 +1496,15 @@ class BertMoCo():
 
 
     def moco_loss(
-            self, logits_q: Tensor, logits_k: Tensor, 
+            self, logits_q: Tuple, logits_k: Tuple, 
             st_queue: Tensor, en_queue: Tensor, temperature
         ):
         start_logits_q, end_logits_q = logits_q
-        start_logits_q = nn.functional.normalize(start_logits_q, dim = 1)
-        end_logits_q = nn.functional.normalize(end_logits_q, dim = 1)
+        start_logits_q = func.normalize(start_logits_q, dim = 1)
+        end_logits_q = func.normalize(end_logits_q, dim = 1)
         start_logits_k, end_logits_k = logits_k
-        start_logits_k = nn.functional.normalize(start_logits_k, dim = 1)
-        end_logits_k = nn.functional.normalize(end_logits_k, dim = 1)
+        start_logits_k = func.normalize(start_logits_k, dim = 1)
+        end_logits_k = func.normalize(end_logits_k, dim = 1)
         start_logits_k.detach()
         end_logits_k.detach()
         N = start_logits_q.size(0)
@@ -1527,6 +1530,7 @@ class BertMoCo():
 
         logits_start = torch.cat([l_pos_start, l_neg_start], dim = 1)
         logits_end = torch.cat([l_pos_end, l_neg_end], dim = 1)
+        # N * (K + 1)
         labels = torch.zeros(N)
         loss_fct = CrossEntropyLoss()
         loss_start = loss_fct(logits_start / temperature, labels)
@@ -1537,22 +1541,25 @@ class BertMoCo():
 
     def total_moco_loss(
             self, logits_dict, path_list,
-            queue_dict, moco_weights, temperature
+            queue_dict, temperature
         ):
         total_loss = 0
-        for (q_name, k_name, queue_key), weight in zip(path_list, moco_weights):
+        total_weight = 0
+        for q_name, k_name, queue_key, weight in path_list:
             total_loss += weight * self.moco_loss(
                 logits_dict[q_name], logits_dict[k_name],
                 queue_dict[queue_key]["start"], queue_dict[queue_key]["end"],
                 temperature
             )
+            total_weight += weight
 
-        return total_loss / float(sum(moco_weights))
+        return total_loss / total_weight
 
 
     def get_logits(self, inputs, model):
         ( 
-            input_ids, token_type_ids, attention_mask, start_positions, end_positions
+            input_ids, token_type_ids, attention_mask,
+            start_positions, end_positions
         ) = inputs
         start_logits, end_logits, _ = model.forward(
             input_ids = input_ids, token_type_ids = token_type_ids,
@@ -1615,5 +1622,3 @@ class BertMoCo():
             sspt_loss, 
             total_moco_loss
             )
-
-        

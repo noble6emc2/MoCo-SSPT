@@ -2,7 +2,7 @@
 __version__ = "0.6.1"
 from .tokenization import BertTokenizer, BasicTokenizer, WordpieceTokenizer
 
-from .blanc import (BertConfig, BertModel, BertForPreTraining,
+from .moco_bert import (BertConfig, BertModel, BertForPreTraining,
                        BertForMaskedLM, BertForNextSentencePrediction,
                        BertForSequenceClassification, BertForMultipleChoice,
                        BertForTokenClassification, BLANC,

@@ -25,7 +25,8 @@ class SquadExample(object):
                  is_impossible=None,
                  start_positions=None,
                  end_positions=None,
-                 orig_answer_texts=None):
+                 orig_answer_texts=None,
+                 ):
         self.qas_id = qas_id
         self.question_text = question_text
         self.doc_tokens = doc_tokens
@@ -72,7 +73,8 @@ class MRQAExample(object):
                  end_positions=None,
                  start_position=None,
                  end_position=None,
-                 is_impossible=None):
+                 is_impossible=None,
+                 ag_question_text=None):
         self.qas_id = qas_id
         self.question_text = question_text
         self.paragraph_text = paragraph_text
@@ -83,6 +85,7 @@ class MRQAExample(object):
         self.start_position = start_position
         self.end_position = end_position
         self.is_impossible = is_impossible
+        self.ag_question_text = ag_question_text
 
     def __str__(self):
         return self.__repr__()
@@ -101,6 +104,9 @@ class MRQAExample(object):
             s += ", end_positions: %s" % (self.end_positions)
         if self.is_impossible:
             s += ", is_impossible: %d" % (self.is_impossible)
+        if self.ag_question_text:
+            s += ", generated_question: %s" %(self.ag_question_text)
+
         return s
 
 
@@ -206,14 +212,28 @@ class BaseProcessor(object):
 
     def _convert_examples_to_features(self, examples, tokenizer, max_seq_length,
                                 doc_stride, max_query_length, is_training,
-                                first_answer_only):
+                                first_answer_only, use_ag = False):
         """Loads a data file into a list of `InputBatch`s."""
 
         unique_id = 1000000000
 
         features = []
         for (example_index, example) in enumerate(examples):
-            query_tokens = tokenizer.tokenize(example.question_text)
+            if use_ag:
+                assert example.ag_question_text is not None
+                q_tokens = tokenizer.tokenize(example.question_text)
+                ag_q_tokens = tokenizer.tokenize(example.ag_question_text)
+                if len(ag_q_tokens) < len(q_tokens):
+                    diff = len(q_tokens) - len(ag_q_tokens) 
+                    query_tokens = ag_q_tokens
+                    query_tokens += ["[PAD]" for _ in range(diff)]
+                elif len(ag_q_tokens) > len(q_tokens):
+                    query_tokens = ag_q_tokens[0:len(q_tokens)]
+                else:
+                    query_tokens = ag_q_tokens
+
+            else:
+                query_tokens = tokenizer.tokenize(example.question_text)
 
             if len(query_tokens) > max_query_length:
                 query_tokens = query_tokens[0:max_query_length]
@@ -274,6 +294,7 @@ class BaseProcessor(object):
                 start_offset += min(length, doc_stride)
             
             for (doc_span_index, doc_span) in enumerate(doc_spans):
+                masked_query_idx_list = []
                 tokens = []
                 token_to_orig_map = {}
                 token_is_max_context = {}
@@ -283,6 +304,9 @@ class BaseProcessor(object):
                 for token in query_tokens:
                     tokens.append(token)
                     segment_ids.append(0)
+                    if use_ag and token == "[PAD]":
+                        masked_query_idx_list.append(len(tokens) - 1)
+
                 tokens.append("[SEP]")
                 segment_ids.append(0)
 
@@ -303,6 +327,9 @@ class BaseProcessor(object):
                 # The mask has 1 for real tokens and 0 for padding tokens. Only real
                 # tokens are attended to.
                 input_mask = [1] * len(input_ids)
+                if use_ag and len(masked_query_idx_list):
+                    for m_q_idx in masked_query_idx_list:
+                        input_mask[m_q_idx] = 0
 
                 # Zero-pad up to the sequence length.
                 while len(input_ids) < max_seq_length:
@@ -624,6 +651,11 @@ class PretrainingProcessor(BaseProcessor):
                     continue'''
 
             question_text = article["question"].replace("[BLANK]", replace_mask)
+            if "ag_question" in article:
+                ag_question_text = article["ag_question"]
+            else:
+                ag_question_text = None
+
             start_position = None
             end_position = None
             orig_answer_text = None
@@ -633,7 +665,7 @@ class PretrainingProcessor(BaseProcessor):
                 {
                     'text': ans,
                     'answer_all_start': [m.start() 
-                        for m in re.finditer(re.escape(ans), paragraph_text)]
+                        for m in re.finditer(re.escape(ans.strip().lower()), paragraph_text.strip().lower())]
                 }
                 for ans in article["answers"]
                 ]
@@ -659,7 +691,7 @@ class PretrainingProcessor(BaseProcessor):
                 char_start, char_end, answer_text = spans[i][0], spans[i][1], spans[i][2]
                 orig_answer_text = paragraph_text[char_start:char_end+1]
                 #print("orig_answer_text", orig_answer_text)
-                if orig_answer_text != answer_text:
+                if orig_answer_text.strip().lower() != answer_text.strip().lower():
                     self.logger.info("Answer error: {}, Original {}".format(
                         answer_text, orig_answer_text))
                     continue
@@ -683,6 +715,7 @@ class PretrainingProcessor(BaseProcessor):
             example = MRQAExample(
                 qas_id=qas_id,
                 question_text=question_text, #question
+                ag_question_text=ag_question_text, #generated question
                 paragraph_text=paragraph_text, # context text
                 doc_tokens=doc_tokens, #passage text
                 orig_answer_text=orig_answer_text, # answer text
