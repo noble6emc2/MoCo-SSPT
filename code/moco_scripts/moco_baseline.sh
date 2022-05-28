@@ -5,7 +5,7 @@ CUDA_VISIBLE_DEVICES=$CUDA python3 src/lm/BLANC/run_moco_baseline.py \
   --train_file $DATA_DIR/sspt_qg_combined_dataset.jsonl \
   --dev_file $DATA_DIR/dev.jsonl.gz \
   --test_file $DATA_DIR/test.jsonl.gz \
-  --train_batch_size 16 \
+  --train_batch_size 32 \
   --learning_rate 2e-5 \
   --num_train_epochs 1 \
   --max_seq_length 384 \

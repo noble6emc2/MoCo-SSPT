@@ -1,0 +1,1 @@
+CUDA=0,1,2,3 LABEL=trial_001_baseline_bert_finetuning SEED=0 DATA_DIR=/research/d4/gds/mindahu21/qa_dataset bash ./moco_scripts/moco_finetuning.sh

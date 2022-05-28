@@ -1,0 +1,21 @@
+PYTHONIOENCODING=utf-8 CUDA_VISIBLE_DEVICES=0 python3 src/lm/BLANC/run_moco_finetuning.py \
+  --do_train \
+  --do_eval \
+  --dataset_type SQuAD \
+  --model_type BertForQA \
+  --model /research/d4/gds/mindahu21/bert_model/bert-base-uncased.tar.gz \
+  --tokenizer /research/d4/gds/mindahu21/bert_model/bert-base-uncased-vocab.txt \
+  --train_file $DATA_DIR/train-v1.1.json \
+  --dev_file $DATA_DIR/dev-v1.1.json \
+  --test_file $DATA_DIR/test.jsonl.gz \
+  --train_batch_size 8 \
+  --eval_batch_size 16  \
+  --learning_rate 2e-5 \
+  --num_train_epochs 12 \
+  --max_seq_length 384 \
+  --doc_stride 128 \
+  --eval_metric f1 \
+  --output_dir ./checkpoints/moco_finetuning/$LABEL/$SEED \
+  --eval_per_epoch 6 \
+  --seed $SEED \
+  --command finetuning

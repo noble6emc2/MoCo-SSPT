@@ -27,8 +27,6 @@ sys.path.append(os.path.dirname(__file__))
 import numpy as np
 import torch
 import datetime
-import pytorch_pretrained_bert.pretrain_dataloader as dataloader
-import pytorch_pretrained_bert.warmup_dataloader as warmup_dataloader
 from torch.utils.data import DataLoader, TensorDataset
 from pytorch_pretrained_bert.file_utils import PYTORCH_PRETRAINED_BERT_CACHE
 from pytorch_pretrained_bert.file_utils import WEIGHTS_NAME, CONFIG_NAME
@@ -524,7 +522,6 @@ if __name__ == "__main__":
     parser.add_argument("--model", default="bert-base-chinese", type=str, required=True)
     parser.add_argument("--model_type", choices=MODEL_TYPES, type=str, required=True)
     parser.add_argument("--dataset_type", choices=DATASET_TYPES, type=str, default='MRQA')
-    parser.add_argument("--training_lang", choices=LANG_TYPES, type=str, required=True)
     parser.add_argument("--command", choices=COMMANDS, type=str, required=True)
     parser.add_argument("--tokenizer", default="bert-base-chinese", type=str, required=True)
     parser.add_argument("--output_dir", default=None, type=str, required=True,
@@ -602,8 +599,6 @@ if __name__ == "__main__":
     parser.add_argument('--max_warmup_query_length', type=int, default=40)
     parser.add_argument('--max_comma_num', type=int, default=5)
     parser.add_argument('--warmup_window_size', type=int, default=8)
-    parser.add_argument('--temperature', type=int, required = True)
-    parser.add_argument('--moco_ratio', type=int, required = True)
     args = parser.parse_args()
 
     print('------new_cotraining_optimizer-----: %s' % args.new_cotraining_optimizer)
